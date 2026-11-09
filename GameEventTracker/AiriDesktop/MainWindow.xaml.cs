@@ -2,6 +2,8 @@ using System.IO;
 using System.Text.Json;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
+using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Threading;
@@ -17,19 +19,32 @@ public partial class MainWindow : Window
     private const int BossReward = 250;
     private const int SinglePullCost = 100;
     private const int TenPullCost = 900;
-    private readonly string _statePath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "AiriDesktop", "state.json");
+    private const int DefaultQuestReward = 25;
+    // AIRI_DATA_DIR lets you point the app at a separate folder (e.g. for testing) without touching your real save.
+    private static readonly string AppFolder = Environment.GetEnvironmentVariable("AIRI_DATA_DIR") is { Length: > 0 } custom
+        ? custom
+        : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "AiriDesktop");
+    private static readonly string PortraitFolder = Path.Combine(AppFolder, "portraits");
+    private readonly string _statePath = Path.Combine(AppFolder, "state.json");
     private readonly Random _random = new();
     private readonly DispatcherTimer _timer;
+    private readonly Dictionary<string, ImageSource?> _portraitCache = [];
     private AppState _state;
+    private bool _ready;
     private bool _binding;
-    private string? _selectedGameId;
+    private string _selectedGameId = "";
+    private string _eventFilter = "all";
+    private int _rarityFilter;
+    private bool _ownedOnly;
     private string? _selectedCharacterId;
+    private string _battleListKey = "";
+    private DateTime _lastDay = DateTime.Today;
     private int _lastArenaWave = -1;
+    private int _ticks;
 
     private static readonly string[] Slots = ["Chest", "Legs", "Helm", "Boots", "Hands", "Weapon", "Cloak", "Rings1", "Ring2", "Trinket1", "Trinket2"];
     private static readonly string[] Rarities = ["Common", "Uncommon", "Rare", "Epic", "Unique"];
     private static readonly string[] BonusNames = ["Might", "Vitality", "Haste", "Aegis", "Focus"];
-    private static readonly string[] RarityOrder = Rarities;
     private static readonly (double Hp, double Attack, double Crit, double Armor)[] RarityStats = [(120, 20, 5, 8), (165, 32, 9, 14), (220, 45, 14, 20)];
     private static readonly Dictionary<string, (double Hp, double Attack, double Crit, double Armor)> CharacterBonuses = new()
     {
@@ -44,6 +59,7 @@ public partial class MainWindow : Window
     ];
     private static readonly string[] MonsterAdjectives = ["Shardbound", "Cinder-veiled", "Gloam-marked", "Frost-bitten", "Hollowglass"];
     private static readonly string[] MonsterForms = ["Riftling", "Gloomstalker", "Obelisk brute", "Veil sentinel", "Shard fiend"];
+    private static readonly CharacterModel StarterFighter = new("rift-runner", "Rift Runner", "Airi's starter", 3, "#87B878");
     private static readonly CharacterModel[] CharacterCatalog =
     [
         new("naruto", "Naruto Uzumaki", "Naruto", 5, "#D98545"), new("sailor-moon", "Sailor Moon", "Sailor Moon", 5, "#D881A8"),
@@ -70,10 +86,6 @@ public partial class MainWindow : Window
         new("rukia", "Rukia Kuchiki", "Bleach", 4, "#8293BD"), new("rengoku", "Kyojuro Rengoku", "Demon Slayer", 5, "#D57848"),
         new("saitama", "Saitama", "One-Punch Man", 5, "#CC5C4C")
     ];
-    private static readonly Dictionary<string, FighterStats> BaseStats = new()
-    {
-        ["3"] = new(120, 20, 5, 8), ["4"] = new(165, 32, 9, 14), ["5"] = new(220, 45, 14, 20)
-    };
 
     public MainWindow()
     {
@@ -83,12 +95,18 @@ public partial class MainWindow : Window
         EnsureWeekly();
         _timer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
         _timer.Tick += (_, _) => Tick();
-        ArenaCanvas.SizeChanged += (_, _) => RenderArena();
-        Loaded += (_, _) => RenderArena();
+        ArenaCanvas.SizeChanged += (_, _) => { _lastArenaWave = -1; RenderArena(); };
         Closing += (_, _) => { _timer.Stop(); SaveState(); };
+        EventStartInput.SelectedDate = EventEndInput.SelectedDate = DateTime.Today;
+        _ready = true;
         RefreshAll();
         _timer.Start();
     }
+
+    private static string TodayKey => DateTime.Today.ToString("yyyy-MM-dd");
+    private static string? TagOf(object sender) => (sender as FrameworkElement)?.Tag as string;
+
+    // ───────────────────────── Persistence ─────────────────────────
 
     private AppState LoadState()
     {
@@ -101,7 +119,7 @@ public partial class MainWindow : Window
     {
         try
         {
-            Directory.CreateDirectory(Path.GetDirectoryName(_statePath)!);
+            Directory.CreateDirectory(AppFolder);
             File.WriteAllText(_statePath, JsonSerializer.Serialize(_state, new JsonSerializerOptions { WriteIndented = true }));
         }
         catch (Exception ex) { MessageBox.Show($"Couldn't save local progress.\n\n{ex.Message}", "Airi's", MessageBoxButton.OK, MessageBoxImage.Error); }
@@ -135,110 +153,187 @@ public partial class MainWindow : Window
         return today.AddDays(-(((int)today.DayOfWeek + 6) % 7)).ToString("yyyy-MM-dd");
     }
 
-    private void EnsureWeekly()
+    private bool EnsureWeekly()
     {
-        if (_state.Weekly.WeekOf == GetWeekKey()) return;
+        if (_state.Weekly.WeekOf == GetWeekKey()) return false;
         _state.Weekly = new WeeklyState { WeekOf = GetWeekKey() };
+        return true;
     }
+
+    // ───────────────────────── Refresh ─────────────────────────
 
     private void Tick()
     {
-        EnsureWeekly();
+        _ticks++;
+        if (DateTime.Today != _lastDay) { _lastDay = DateTime.Today; EnsureWeekly(); RefreshAll(); }
+        else if (EnsureWeekly()) RefreshWeekly();
         if (ProcessBattle()) SaveState();
         RefreshBattle();
         RefreshSummary();
-        WeeklyGoalsList.ItemsSource = BuildWeeklyGoals();
+        if (_ticks % 60 == 0) RefreshEvents(); // keep "Ends in …" countdowns current
     }
 
     private void RefreshAll()
     {
         _binding = true;
         EnsureWeekly();
-        var selectedGame = _selectedGameId ?? _state.Games.FirstOrDefault()?.Id;
-        GamesList.ItemsSource = _state.Games.ToList();
-        GamesList.SelectedValuePath = nameof(GameModel.Id);
-        GamesList.SelectedValue = selectedGame;
-        _selectedGameId = selectedGame;
+        if (_selectedGameId != "" && _state.Games.All(g => g.Id != _selectedGameId)) _selectedGameId = "";
+
+        var rows = new List<GameRowModel> { new("", "All games", Palette.Muted, _state.Events.Count.ToString(), false) };
+        rows.AddRange(_state.Games.Select((g, i) => new GameRowModel(g.Id, g.Name, Palette.Game(i), _state.Events.Count(e => e.GameId == g.Id).ToString(), true)));
+        GamesList.ItemsSource = rows;
+        GamesList.SelectedValue = _selectedGameId;
+
+        var fallback = _selectedGameId != "" ? _selectedGameId : _state.Games.FirstOrDefault()?.Id;
+        var eventGame = EventGameInput.SelectedValue as string;
         EventGameInput.ItemsSource = _state.Games.ToList();
-        EventGameInput.DisplayMemberPath = nameof(GameModel.Name);
-        EventGameInput.SelectedValuePath = nameof(GameModel.Id);
-        EventGameInput.SelectedValue = selectedGame;
+        EventGameInput.SelectedValue = _selectedGameId != "" ? _selectedGameId : IsGame(eventGame) ? eventGame : fallback;
+        var questGame = QuestGameInput.SelectedValue as string;
         QuestGameInput.ItemsSource = _state.Games.ToList();
-        QuestGameInput.DisplayMemberPath = nameof(GameModel.Name);
-        QuestGameInput.SelectedValuePath = nameof(GameModel.Id);
-        QuestGameInput.SelectedValue = selectedGame;
+        QuestGameInput.SelectedValue = IsGame(questGame) ? questGame : fallback;
+
         RefreshTrackerLists();
         RefreshCharacters();
-        RefreshBattle();
+        RefreshBattle(force: true);
         RefreshSummary();
         _binding = false;
     }
 
+    private bool IsGame(string? id) => id is not null && _state.Games.Any(g => g.Id == id);
+
     private void RefreshTrackerLists()
     {
-        var gameId = _selectedGameId;
-        EventsList.ItemsSource = _state.Events.Where(e => gameId is null || e.GameId == gameId).OrderBy(e => e.Starts)
-            .Select(e => new EventRow(e, _state.Games.FirstOrDefault(g => g.Id == e.GameId)?.Name ?? "Unknown game")).ToList();
-        var questGame = QuestGameInput.SelectedValue as string ?? gameId;
-        DailyQuestsList.ItemsSource = _state.DailyQuests.Where(q => q.GameId == questGame).ToList();
-        WeeklyGoalsList.ItemsSource = BuildWeeklyGoals();
+        RefreshEvents();
+        RefreshQuests();
+        RefreshWeekly();
     }
 
-    private List<WeeklyGoalModel> BuildWeeklyGoals() =>
+    private void RefreshEvents()
+    {
+        var today = DateTime.Today;
+        var events = _state.Events.Where(e => _selectedGameId == "" || e.GameId == _selectedGameId);
+        events = _eventFilter switch
+        {
+            "upcoming" => events.Where(e => !e.Done && e.Ends.Date >= today),
+            "done" => events.Where(e => e.Done),
+            _ => events
+        };
+        var rows = events.OrderBy(e => e.Starts).Select(BuildEventRow).ToList();
+        EventsList.ItemsSource = rows;
+        EventCountText.Text = rows.Count.ToString();
+        EventsEmpty.Visibility = rows.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    private EventRowModel BuildEventRow(EventModel e)
+    {
+        var index = _state.Games.FindIndex(g => g.Id == e.GameId);
+        var gameName = index >= 0 ? _state.Games[index].Name : "Unknown game";
+        var today = DateTime.Today;
+        var (status, brush) = e.Done ? ("COMPLETED", Palette.Green)
+            : e.Ends.Date < today ? ("ENDED", Palette.Muted)
+            : e.Starts.Date <= today ? ("LIVE NOW", Palette.Red)
+            : ("UPCOMING", Palette.Blue);
+        var dates = e.Starts.Date == e.Ends.Date ? $"{e.Starts:MMM d}" : $"{e.Starts:MMM d} – {e.Ends:MMM d}";
+        return new EventRowModel(e.Id, e.Title, gameName, Palette.Game(index), dates, status, brush, Countdown(e), e.Done);
+    }
+
+    private static string Countdown(EventModel e)
+    {
+        var now = DateTime.Now;
+        if (e.Done || e.Ends.Date < now.Date) return "";
+        var startsLater = e.Starts.Date > now.Date;
+        var span = (startsLater ? e.Starts.Date : e.Ends.Date.AddDays(1)) - now;
+        var text = span.TotalDays >= 1 ? $"{(int)span.TotalDays}d {span.Hours}h" : span.TotalHours >= 1 ? $"{span.Hours}h {span.Minutes}m" : $"{Math.Max(1, span.Minutes)}m";
+        return $"{(startsLater ? "Starts in" : "Ends in")} {text}";
+    }
+
+    private void RefreshQuests()
+    {
+        var questGame = QuestGameInput.SelectedValue as string;
+        var today = TodayKey;
+        var rows = _state.DailyQuests.Where(q => q.GameId == questGame).Select(q => new QuestRowModel(q.Id, q.Title, q.Reward, q.CompletedOn == today)).ToList();
+        DailyQuestsList.ItemsSource = rows;
+        QuestsEmpty.Visibility = rows.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    private List<WeeklyGoalRow> BuildWeeklyGoals() =>
     [
         new("daily-clears", "Complete 10 daily quests", _state.Weekly.DailyClears, 10, 150, _state.Weekly.Claimed.Contains("daily-clears")),
         new("event-clears", "Complete 3 game events", _state.Weekly.EventClears, 3, 200, _state.Weekly.Claimed.Contains("event-clears")),
         new("boss-clears", "Defeat 1 Rift boss", _state.Weekly.Bosses, 1, 250, _state.Weekly.Claimed.Contains("boss-clears"))
     ];
 
+    private void RefreshWeekly()
+    {
+        var goals = BuildWeeklyGoals();
+        WeeklyGoalsList.ItemsSource = goals;
+        WeeklyDoneText.Text = $"{goals.Count(g => g.Claimed)}/{goals.Count}";
+    }
+
     private void RefreshSummary()
     {
         BalanceText.Text = _state.Balance.ToString("N0");
-        UpcomingText.Text = _state.Events.Count(e => !e.Done && e.Ends.Date >= DateTime.Today).ToString("00");
-        var quests = _state.DailyQuests.Where(q => _state.Games.Any(g => g.Id == q.GameId)).ToList();
-        DailyProgressText.Text = $"{quests.Count(q => q.CompletedOn == DateTime.Today.ToString("yyyy-MM-dd"))} / {quests.Count}";
-        WaveSummaryText.Text = $"Wave {_state.Battler.Wave}";
+        var quests = _state.DailyQuests.Where(q => IsGame(q.GameId)).ToList();
+        ChipDailyText.Text = $"{quests.Count(q => q.CompletedOn == TodayKey)}/{quests.Count}";
+        ChipWeeklyText.Text = BuildWeeklyGoals().Count(g => g.Ready).ToString();
+        ChipEventsText.Text = _state.Events.Count(e => !e.Done && e.Ends.Date >= DateTime.Today).ToString("00");
+        ChipPityText.Text = (50 - _state.PityFive).ToString();
+        ChipWaveText.Text = $"W{_state.Battler.Wave}";
+        TopWaveText.Text = $"W{_state.Battler.Wave}";
+        HeroAffordText.Text = (_state.Balance / SinglePullCost).ToString();
+        HeroPullButton.IsEnabled = PullOneButton.IsEnabled = _state.Balance >= SinglePullCost;
+        HeroPullTenButton.IsEnabled = PullTenButton.IsEnabled = _state.Balance >= TenPullCost;
     }
 
-    private void RefreshCharacters()
+    // ───────────────────────── Navigation & filters ─────────────────────────
+
+    private void Nav_Checked(object sender, RoutedEventArgs e)
     {
-        CharactersList.ItemsSource = CharacterCatalog.Select(c =>
-        {
-            var count = _state.OwnedCharacters.GetValueOrDefault(c.Id);
-            var duplicates = Math.Max(0, count - 1);
-            var image = LoadPortrait(_state.CharacterImages.GetValueOrDefault(c.Id));
-            var initials = string.Concat(c.Name.Split(' ', StringSplitOptions.RemoveEmptyEntries).Take(2).Select(p => p[0]));
-            var label = count == 0 ? "NOT PULLED" : $"×{count}" + (duplicates > 0 ? $" · +{duplicates * 3} ATK" : "");
-            return new CharacterCardModel(c.Id, c.Name, $"{c.Rarity}-star · {c.Source}", label, initials, c.Rarity, image);
-        }).ToList();
-        CollectionSummaryText.Text = $"{_state.OwnedCharacters.Count(kv => kv.Value > 0)} / {CharacterCatalog.Length} owned · 5-star pity {_state.PityFive}/50 · 4-star pity {_state.PityFour}/10\n3-star 70% · 4-star 24% · 5-star 6%\nDuplicates add +12 HP, +3 ATK, +1 CRIT, +1 ARMOR each.";
-        GachaResultText.Text = _state.LastPulls.Count == 0 ? "Pulls cost 100 Pulse, or 900 for ten." : $"Last pull: {string.Join(", ", _state.LastPulls)}";
+        if (TrackerView is null || BoostersView is null || RiftView is null) return;
+        TrackerView.Visibility = NavTracker.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
+        BoostersView.Visibility = NavBoosters.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
+        RiftView.Visibility = NavRift.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
+        if (RiftView.Visibility == Visibility.Visible) { _lastArenaWave = -1; Dispatcher.BeginInvoke(RenderArena, DispatcherPriority.Loaded); }
     }
 
-    private static BitmapImage? LoadPortrait(string? path)
+    private void EventFilter_Checked(object sender, RoutedEventArgs e)
     {
-        if (string.IsNullOrWhiteSpace(path) || !File.Exists(path)) return null;
-        try
-        {
-            var bitmap = new BitmapImage();
-            bitmap.BeginInit();
-            bitmap.CacheOption = BitmapCacheOption.OnLoad;
-            bitmap.UriSource = new Uri(path, UriKind.Absolute);
-            bitmap.EndInit();
-            bitmap.Freeze();
-            return bitmap;
-        }
-        catch { return null; }
+        _eventFilter = TagOf(sender) ?? "all";
+        if (_ready) RefreshEvents();
     }
+
+    private void RarityFilter_Checked(object sender, RoutedEventArgs e)
+    {
+        _rarityFilter = int.TryParse(TagOf(sender), out var stars) ? stars : 0;
+        if (_ready) RefreshCharacters();
+    }
+
+    private void OwnedOnly_Changed(object sender, RoutedEventArgs e)
+    {
+        _ownedOnly = OwnedOnlyToggle.IsChecked == true;
+        if (_ready) RefreshCharacters();
+    }
+
+    // ───────────────────────── Tracker actions ─────────────────────────
+
+    private void GameNameInput_KeyDown(object sender, KeyEventArgs e) { if (e.Key == Key.Enter) AddGame_Click(sender, e); }
+    private void EventTitleInput_KeyDown(object sender, KeyEventArgs e) { if (e.Key == Key.Enter) AddEvent_Click(sender, e); }
+    private void DailyQuestNameInput_KeyDown(object sender, KeyEventArgs e) { if (e.Key == Key.Enter) AddDailyQuest_Click(sender, e); }
 
     private void AddGame_Click(object sender, RoutedEventArgs e)
     {
         var name = GameNameInput.Text.Trim();
-        if (name.Length == 0 || _state.Games.Any(g => g.Name.Equals(name, StringComparison.OrdinalIgnoreCase))) return;
+        if (name.Length == 0) return;
+        if (_state.Games.Any(g => g.Name.Equals(name, StringComparison.OrdinalIgnoreCase)))
+        {
+            MessageBox.Show("That game is already in your library.", "Airi's");
+            return;
+        }
         var game = new GameModel { Name = name };
         _state.Games.Add(game);
         _state.DailyQuests.AddRange([new QuestModel { GameId = game.Id, Title = "Play for 15 minutes", Reward = 20 }, new QuestModel { GameId = game.Id, Title = "Complete one activity", Reward = 25 }]);
         _selectedGameId = game.Id;
+        QuestGameInput.SelectedValue = game.Id;
         GameNameInput.Clear();
         SaveState();
         RefreshAll();
@@ -246,24 +341,35 @@ public partial class MainWindow : Window
 
     private void RemoveGame_Click(object sender, RoutedEventArgs e)
     {
-        if (GamesList.SelectedItem is not GameModel game) return;
+        var game = _state.Games.FirstOrDefault(g => g.Id == TagOf(sender));
+        if (game is null) return;
         if (MessageBox.Show($"Remove {game.Name} and its events and quests?", "Airi's", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes) return;
         _state.Games.Remove(game);
         _state.Events.RemoveAll(item => item.GameId == game.Id);
         _state.DailyQuests.RemoveAll(item => item.GameId == game.Id);
-        _selectedGameId = _state.Games.FirstOrDefault()?.Id;
+        if (_selectedGameId == game.Id) _selectedGameId = "";
         SaveState();
         RefreshAll();
     }
 
     private void GamesList_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
-        if (_binding) return;
-        _selectedGameId = GamesList.SelectedValue as string;
+        if (_binding || !_ready) return;
+        _selectedGameId = GamesList.SelectedValue as string ?? "";
+        if (_selectedGameId != "")
+        {
+            _binding = true;
+            EventGameInput.SelectedValue = _selectedGameId;
+            QuestGameInput.SelectedValue = _selectedGameId;
+            _binding = false;
+        }
         RefreshTrackerLists();
     }
 
-    private void QuestGameInput_SelectionChanged(object sender, SelectionChangedEventArgs e) { if (!_binding) RefreshTrackerLists(); }
+    private void QuestGameInput_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (!_binding && _ready) RefreshQuests();
+    }
 
     private void AddEvent_Click(object sender, RoutedEventArgs e)
     {
@@ -279,17 +385,17 @@ public partial class MainWindow : Window
 
     private void CompleteEvent_Click(object sender, RoutedEventArgs e)
     {
-        if (EventsList.SelectedItem is not EventRow row || row.Event.Done) return;
-        row.Event.Done = true;
-        if (!row.Event.RewardClaimed) { row.Event.RewardClaimed = true; _state.Balance += EventReward; _state.Weekly.EventClears++; }
+        var ev = _state.Events.FirstOrDefault(x => x.Id == TagOf(sender));
+        if (ev is null || ev.Done) return;
+        ev.Done = true;
+        if (!ev.RewardClaimed) { ev.RewardClaimed = true; _state.Balance += EventReward; _state.Weekly.EventClears++; }
         SaveState();
         RefreshAll();
     }
 
     private void RemoveEvent_Click(object sender, RoutedEventArgs e)
     {
-        if (EventsList.SelectedItem is not EventRow row) return;
-        _state.Events.Remove(row.Event);
+        _state.Events.RemoveAll(x => x.Id == TagOf(sender));
         SaveState();
         RefreshAll();
     }
@@ -297,30 +403,205 @@ public partial class MainWindow : Window
     private void AddDailyQuest_Click(object sender, RoutedEventArgs e)
     {
         if (QuestGameInput.SelectedItem is not GameModel game || string.IsNullOrWhiteSpace(DailyQuestNameInput.Text)) return;
-        _state.DailyQuests.Add(new QuestModel { GameId = game.Id, Title = DailyQuestNameInput.Text.Trim(), Reward = 25 });
-        DailyQuestNameInput.Clear(); SaveState(); RefreshAll();
+        var reward = int.TryParse(QuestRewardInput.Text.Trim(), out var value) ? Math.Clamp(value, 1, 1000) : DefaultQuestReward;
+        _state.DailyQuests.Add(new QuestModel { GameId = game.Id, Title = DailyQuestNameInput.Text.Trim(), Reward = reward });
+        DailyQuestNameInput.Clear();
+        QuestRewardInput.Clear();
+        SaveState();
+        RefreshQuests();
+        RefreshSummary();
     }
 
     private void CompleteDaily_Click(object sender, RoutedEventArgs e)
     {
-        if (DailyQuestsList.SelectedItem is not QuestModel quest || quest.CompletedOn == DateTime.Today.ToString("yyyy-MM-dd")) return;
-        quest.CompletedOn = DateTime.Today.ToString("yyyy-MM-dd"); quest.EarnedOn = quest.CompletedOn;
-        _state.Balance += quest.Reward; _state.Weekly.DailyClears++; SaveState(); RefreshAll();
+        var quest = _state.DailyQuests.FirstOrDefault(q => q.Id == TagOf(sender));
+        if (quest is null || quest.CompletedOn == TodayKey) return;
+        quest.CompletedOn = TodayKey;
+        quest.EarnedOn = quest.CompletedOn;
+        _state.Balance += quest.Reward;
+        _state.Weekly.DailyClears++;
+        SaveState();
+        RefreshQuests();
+        RefreshWeekly();
+        RefreshSummary();
     }
 
     private void RemoveDailyQuest_Click(object sender, RoutedEventArgs e)
     {
-        if (DailyQuestsList.SelectedItem is not QuestModel quest) return;
-        _state.DailyQuests.Remove(quest);
+        _state.DailyQuests.RemoveAll(q => q.Id == TagOf(sender));
         SaveState();
-        RefreshAll();
+        RefreshQuests();
+        RefreshSummary();
     }
 
     private void ClaimWeekly_Click(object sender, RoutedEventArgs e)
     {
-        if (WeeklyGoalsList.SelectedItem is not WeeklyGoalModel goal || goal.Claimed || goal.Progress < goal.Target) return;
-        _state.Weekly.Claimed.Add(goal.Id); _state.Balance += goal.Reward; SaveState(); RefreshAll();
+        var goal = BuildWeeklyGoals().FirstOrDefault(g => g.Id == TagOf(sender));
+        if (goal is null || !goal.Ready) return;
+        _state.Weekly.Claimed.Add(goal.Id);
+        _state.Balance += goal.Reward;
+        SaveState();
+        RefreshWeekly();
+        RefreshSummary();
     }
+
+    // ───────────────────────── Characters & cards ─────────────────────────
+
+    private static FighterStats CharacterStats(CharacterModel c, int copies)
+    {
+        var b = RarityStats[Math.Clamp(c.Rarity - 3, 0, 2)];
+        var s = CharacterBonuses.GetValueOrDefault(c.Id);
+        var d = Math.Max(0, copies - 1);
+        return new(b.Hp + s.Hp + d * 12, b.Attack + s.Attack + d * 3, b.Crit + s.Crit + d, b.Armor + s.Armor + d);
+    }
+
+    private CharacterCardModel BuildCard(CharacterModel c, int copies)
+    {
+        var stats = CharacterStats(c, Math.Max(1, copies));
+        var rarity = Palette.Rarity(c.Rarity);
+        var index = Array.FindIndex(CharacterCatalog, x => x.Id == c.Id);
+        var number = index >= 0 ? $"#{index + 1:00}/{CharacterCatalog.Length}" : "#STARTER";
+        var initials = string.Concat(c.Name.Split(' ', StringSplitOptions.RemoveEmptyEntries).Take(2).Select(p => p[0]));
+        return new CharacterCardModel(c.Id, c.Name, c.Source, c.Rarity, rarity.Label, rarity.Letter, rarity.Accent, rarity.Surface,
+            Palette.Art(c.Color), initials, number, (int)stats.Attack, (int)(stats.Crit + stats.Armor), copies, Portrait(c.Id));
+    }
+
+    private void RefreshCharacters()
+    {
+        var cards = CharacterCatalog.Select(c => BuildCard(c, _state.OwnedCharacters.GetValueOrDefault(c.Id))).ToList();
+        var visible = cards
+            .Where(c => (_rarityFilter == 0 || c.Rarity == _rarityFilter) && (!_ownedOnly || c.IsOwned))
+            .OrderByDescending(c => c.IsOwned).ThenByDescending(c => c.Rarity).ThenBy(c => c.Name)
+            .ToList();
+        var keep = _selectedCharacterId;
+        CharactersList.ItemsSource = visible;
+        CharactersList.SelectedItem = visible.FirstOrDefault(c => c.Id == keep);
+
+        var owned = cards.Count(c => c.IsOwned);
+        CollectionCountText.Text = $"{owned}/{cards.Count}";
+        TileOwnedText.Text = $"{owned}/{cards.Count}";
+        TileLegendText.Text = (50 - _state.PityFive).ToString();
+        TileEpicText.Text = (10 - _state.PityFour).ToString();
+        PoolSubtitleText.Text = $"Every character · {cards.Count} cards";
+
+        // Hero showcase: your three best cards, topped up with Legendaries you haven't pulled yet.
+        var featured = cards.Where(c => c.IsOwned).OrderByDescending(c => c.Rarity).ThenByDescending(c => c.Copies).Take(3).ToList();
+        featured.AddRange(cards.Where(c => c.Rarity == 5 && !featured.Contains(c)).Take(3 - featured.Count));
+        HeroCenter.Content = featured[0];
+        HeroLeft.Content = featured[1];
+        HeroRight.Content = featured[2];
+
+        var last = _state.LastPulls
+            .Select(entry => CharacterCatalog.FirstOrDefault(c => c.Id == entry) ?? CharacterCatalog.FirstOrDefault(c => entry.StartsWith(c.Name + " ")))
+            .OfType<CharacterModel>()
+            .Select(c => cards.First(card => card.Id == c.Id))
+            .ToList();
+        LastPullsList.ItemsSource = last;
+        LastPullsEmpty.Visibility = last.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+        RefreshSelectedCard();
+    }
+
+    private void RefreshSelectedCard()
+    {
+        var character = CharacterCatalog.FirstOrDefault(c => c.Id == _selectedCharacterId);
+        SelectedCardText.Text = character?.Name ?? "Select a card";
+        SetArtButton.IsEnabled = character is not null;
+        RemoveArtButton.IsEnabled = character is not null && _state.CharacterImages.ContainsKey(character.Id);
+    }
+
+    private void CharactersList_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (CharactersList.SelectedItem is CharacterCardModel card) _selectedCharacterId = card.Id;
+        RefreshSelectedCard();
+    }
+
+    private void CharactersList_MouseDoubleClick(object sender, MouseButtonEventArgs e)
+    {
+        if (CharactersList.SelectedItem is CharacterCardModel card) ImportArt(card.Id);
+    }
+
+    private void ImportPortrait_Click(object sender, RoutedEventArgs e)
+    {
+        if (_selectedCharacterId is not null) ImportArt(_selectedCharacterId);
+    }
+
+    private void RemoveArt_Click(object sender, RoutedEventArgs e)
+    {
+        if (_selectedCharacterId is null) return;
+        RemoveArt(_selectedCharacterId);
+        SaveState();
+        RefreshCharacters();
+        RefreshBattle(force: true);
+    }
+
+    private void ImportArt(string characterId)
+    {
+        var name = CharacterCatalog.FirstOrDefault(c => c.Id == characterId)?.Name ?? "this card";
+        var dialog = new OpenFileDialog { Title = $"Choose art for {name}", Filter = "Images and GIFs|*.gif;*.png;*.jpg;*.jpeg;*.bmp" };
+        if (dialog.ShowDialog(this) != true) return;
+        try
+        {
+            Directory.CreateDirectory(PortraitFolder);
+            // A fresh file name each time, so a GIF that is still playing never blocks the replacement.
+            var destination = Path.Combine(PortraitFolder, $"{characterId}-{DateTime.Now:yyyyMMddHHmmss}{Path.GetExtension(dialog.FileName).ToLowerInvariant()}");
+            File.Copy(dialog.FileName, destination, true);
+            if (LoadPortrait(destination) is null)
+            {
+                TryDelete(destination);
+                MessageBox.Show("That file couldn't be opened as an image.", "Airi's", MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
+            }
+            RemoveArt(characterId);
+            _state.CharacterImages[characterId] = destination;
+            SaveState();
+            RefreshCharacters();
+            RefreshBattle(force: true);
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show($"Couldn't import that picture.\n\n{ex.Message}", "Airi's", MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+    }
+
+    private void RemoveArt(string characterId)
+    {
+        if (!_state.CharacterImages.Remove(characterId, out var old)) return;
+        _portraitCache.Remove(old);
+        if (Path.GetFullPath(old).StartsWith(PortraitFolder, StringComparison.OrdinalIgnoreCase)) TryDelete(old);
+    }
+
+    private static void TryDelete(string path)
+    {
+        try { File.Delete(path); } catch { /* still in use; harmless leftover */ }
+    }
+
+    private ImageSource? Portrait(string characterId)
+    {
+        var path = _state.CharacterImages.GetValueOrDefault(characterId);
+        if (string.IsNullOrWhiteSpace(path)) return null;
+        if (!_portraitCache.TryGetValue(path, out var image)) _portraitCache[path] = image = LoadPortrait(path);
+        return image;
+    }
+
+    private static BitmapImage? LoadPortrait(string path)
+    {
+        if (!File.Exists(path)) return null;
+        try
+        {
+            var bitmap = new BitmapImage();
+            bitmap.BeginInit();
+            bitmap.CacheOption = BitmapCacheOption.OnLoad;
+            bitmap.UriSource = new Uri(path, UriKind.Absolute);
+            // Downscale big stills; GIFs are decoded frame-by-frame by the animator.
+            if (!path.EndsWith(".gif", StringComparison.OrdinalIgnoreCase)) bitmap.DecodePixelWidth = 420;
+            bitmap.EndInit();
+            bitmap.Freeze();
+            return bitmap;
+        }
+        catch { return null; }
+    }
+
+    // ───────────────────────── Gacha ─────────────────────────
 
     private CharacterModel DrawCharacter()
     {
@@ -338,53 +619,41 @@ public partial class MainWindow : Window
 
     private void PullOne_Click(object sender, RoutedEventArgs e) => Pull(1);
     private void PullTen_Click(object sender, RoutedEventArgs e) => Pull(10);
+
     private void Pull(int count)
     {
         var cost = count == 1 ? SinglePullCost : TenPullCost;
-        if (_state.Balance < cost) { GachaResultText.Text = $"Need {cost} Pulse for that pull."; return; }
+        if (_state.Balance < cost) { GachaResultText.Text = $"You need {cost} ◆ for that pull."; return; }
         _state.Balance -= cost;
-        _state.LastPulls = Enumerable.Range(0, count).Select(_ => DrawCharacter()).Select(c =>
-        {
-            _state.OwnedCharacters[c.Id] = _state.OwnedCharacters.GetValueOrDefault(c.Id) + 1;
-            return $"{c.Name} {new string('★', c.Rarity)}";
-        }).ToList();
-        SaveState(); RefreshAll();
+        var results = Enumerable.Range(0, count).Select(_ => DrawCharacter()).ToList();
+        foreach (var c in results) _state.OwnedCharacters[c.Id] = _state.OwnedCharacters.GetValueOrDefault(c.Id) + 1;
+        _state.LastPulls = results.Select(c => c.Id).ToList();
+        var best = results.MaxBy(c => c.Rarity)!;
+        GachaResultText.Text = count == 1
+            ? $"{Palette.Rarity(best.Rarity).Label} · {best.Name}"
+            : $"{results.Count(c => c.Rarity == 5)} Legendary · {results.Count(c => c.Rarity == 4)} Epic · {results.Count(c => c.Rarity == 3)} Rare";
+        SaveState();
+        RefreshCharacters();
+        RefreshBattle(force: true);
+        RefreshSummary();
     }
 
-    private void CharactersList_SelectionChanged(object sender, SelectionChangedEventArgs e)
-    {
-        if (CharactersList.SelectedItem is CharacterCardModel card) _selectedCharacterId = card.Id;
-    }
-
-    private void ImportPortrait_Click(object sender, RoutedEventArgs e)
-    {
-        if (CharactersList.SelectedItem is not CharacterCardModel card) return;
-        var dialog = new OpenFileDialog { Filter = "Image files|*.png;*.jpg;*.jpeg;*.bmp;*.gif;*.tif" };
-        if (dialog.ShowDialog(this) != true) return;
-        var folder = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "AiriDesktop", "portraits");
-        Directory.CreateDirectory(folder);
-        var destination = Path.Combine(folder, card.Id + Path.GetExtension(dialog.FileName));
-        File.Copy(dialog.FileName, destination, true);
-        _state.CharacterImages[card.Id] = destination;
-        SaveState(); RefreshCharacters();
-    }
+    // ───────────────────────── Rift battler ─────────────────────────
 
     private List<(CharacterModel Character, int Copies)> GetParty()
     {
         var pulled = CharacterCatalog.Where(c => _state.OwnedCharacters.GetValueOrDefault(c.Id) > 0)
             .Select(c => (Character: c, Copies: _state.OwnedCharacters[c.Id])).ToList();
-        return pulled.Count > 0 ? pulled : [(new CharacterModel("rift-runner", "Rift Runner", "Airi's starter", 3, "#87B878"), 1)];
+        return pulled.Count > 0 ? pulled : [(StarterFighter, 1)];
     }
 
     private FighterStats GetPartyStats()
     {
         var total = new FighterStats(0, 0, 0, 0);
-        foreach (var member in GetParty())
+        foreach (var (character, copies) in GetParty())
         {
-            var baseStats = RarityStats[member.Character.Rarity - 3];
-            var special = CharacterBonuses.GetValueOrDefault(member.Character.Id);
-            var duplicates = Math.Max(0, member.Copies - 1);
-            total = total with { Hp = total.Hp + baseStats.Hp + special.Hp + duplicates * 12, Attack = total.Attack + baseStats.Attack + special.Attack + duplicates * 3, Crit = total.Crit + baseStats.Crit + special.Crit + duplicates, Armor = total.Armor + baseStats.Armor + special.Armor + duplicates };
+            var s = CharacterStats(character, copies);
+            total = new(total.Hp + s.Hp, total.Attack + s.Attack, total.Crit + s.Crit, total.Armor + s.Armor);
         }
         foreach (var slot in Slots)
         {
@@ -394,7 +663,14 @@ public partial class MainWindow : Window
             var rank = Math.Max(1, Array.IndexOf(Rarities, item.Rarity) + 1);
             total = slot == "Weapon" ? total with { Attack = total.Attack + rank * 6 + item.Wave / 40 * 2 } : total with { Armor = total.Armor + rank * 3 + item.Wave / 40 };
             foreach (var bonus in item.Bonuses)
-                total = bonus.Key switch { "Might" => total with { Attack = total.Attack + bonus.Value }, "Vitality" => total with { Hp = total.Hp + bonus.Value * 4 }, "Haste" or "Focus" => total with { Crit = total.Crit + bonus.Value }, "Aegis" => total with { Armor = total.Armor + bonus.Value }, _ => total };
+                total = bonus.Key switch
+                {
+                    "Might" => total with { Attack = total.Attack + bonus.Value },
+                    "Vitality" => total with { Hp = total.Hp + bonus.Value * 4 },
+                    "Haste" or "Focus" => total with { Crit = total.Crit + bonus.Value },
+                    "Aegis" => total with { Armor = total.Armor + bonus.Value },
+                    _ => total
+                };
         }
         return total with { Crit = Math.Min(100, total.Crit) };
     }
@@ -446,7 +722,7 @@ public partial class MainWindow : Window
             if (fight.Health <= 0)
             {
                 var item = AddArmorDrop(fight.Wave, true); _state.Balance += BossReward; _state.Weekly.Bosses++;
-                AddBattleLog($"Boss defeated: {item.Rarity} {item.Name}; +{BossReward} Pulse.");
+                AddBattleLog($"Boss defeated: {item.Rarity} {item.Name}; +{BossReward} ◆.");
                 battle.Wave = fight.Wave + 1; battle.Boss = null; battle.NextWaveAt = now.AddSeconds(12); return true;
             }
             if (now >= fight.Deadline)
@@ -500,52 +776,84 @@ public partial class MainWindow : Window
         _state.Battler.Equipment[item.Slot] = item.Id; item.AutoEquipped = true;
     }
 
-    private static double ArmorScore(ArmorModel item) => Math.Max(0, Array.IndexOf(RarityOrder, item.Rarity)) * 10000 + item.Wave * 10 + item.Bonuses.Values.Sum() * 100;
+    private static double ArmorScore(ArmorModel item) => Math.Max(0, Array.IndexOf(Rarities, item.Rarity)) * 10000 + item.Wave * 10 + item.Bonuses.Values.Sum() * 100;
 
-    private void RefreshBattle()
+    private void RefreshBattle(bool force = false)
     {
-        var battle = _state.Battler; var boss = !battle.PrepareBoss && battle.Wave % 20 == 0;
-        var party = GetParty();
-        PartyList.ItemsSource = party.Select(p => new PartyMemberModel(p.Character.Id, p.Character.Name, p.Character.Source, p.Character.Rarity, p.Copies, $"{p.Character.Name} · {p.Character.Rarity}-star · {p.Copies} copies")).ToList();
-        var stats = GetPartyStats();
-        PartyStatsText.Text = $"PARTY TOTAL · HP {stats.Hp:N0}   ATK {stats.Attack:N0}   CRIT {stats.Crit:0}%   ARMOR {stats.Armor:N0}";
+        var battle = _state.Battler;
+        var boss = !battle.PrepareBoss && battle.Wave % 20 == 0;
+
+        // Only rebuild lists when something in them changed, so scroll position and selection survive the 1s timer.
+        var key = string.Join("|", battle.Wave, battle.Armor.Count, battle.Armor.Sum(a => a.Count), string.Join(",", battle.Equipment.Values),
+            battle.Log.FirstOrDefault(), battle.Alloy, _state.Weekly.Bosses);
+        if (force || key != _battleListKey)
+        {
+            _battleListKey = key;
+            PartyList.ItemsSource = GetParty().Select(p => BuildCard(p.Character, p.Copies)).OrderByDescending(c => c.Rarity).ThenByDescending(c => c.Copies).ToList();
+            var stats = GetPartyStats();
+            StatHpText.Text = stats.Hp.ToString("N0");
+            StatAtkText.Text = stats.Attack.ToString("N0");
+            StatCritText.Text = $"{stats.Crit:0}%";
+            StatArmorText.Text = stats.Armor.ToString("N0");
+            ArmorList.ItemsSource = battle.Armor.OrderByDescending(ArmorScore).Select(a => new ArmorRowModel(
+                a.Name, $"{a.Rarity} · {a.Slot} · W{a.Wave}", string.Join("  ·  ", a.Bonuses.Select(b => $"{b.Key} +{b.Value}")),
+                $"×{a.Count}", Palette.Armor(a.Rarity), battle.Equipment.GetValueOrDefault(a.Slot) == a.Id)).ToList();
+            ArmorEmpty.Visibility = battle.Armor.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+            ArmorCountText.Text = battle.Armor.Sum(a => a.Count).ToString();
+            AlloyRun.Text = battle.Alloy.ToString();
+            BattleLogList.ItemsSource = battle.Log.ToList();
+            RefreshWeekly();
+        }
+
         WaveText.Text = battle.PrepareBoss ? $"FARM WAVE {battle.Wave} · BOSS {battle.BossFailedWave} FAILED" : boss ? $"BOSS WAVE {battle.Wave}" : $"WAVE {battle.Wave} · INFINITE DESCENT";
-        PauseBattleButton.Content = battle.Paused ? "Resume" : "Pause"; ReturnBossButton.Visibility = battle.PrepareBoss ? Visibility.Visible : Visibility.Collapsed;
-        EnemyStatsText.Text = $"Level {battle.Wave} · HP {(100 + (battle.Wave - 1) * 65) * (boss ? 12 : 1):N0} · ATK {(12 + (battle.Wave - 1) * 7) * (boss ? 3 : 1):N0}";
+        PauseBattleButton.Content = battle.Paused ? "Resume" : "Pause";
+        ReturnBossButton.Visibility = battle.PrepareBoss ? Visibility.Visible : Visibility.Collapsed;
+        ReturnBossButton.Content = $"Return to wave {battle.BossFailedWave} boss";
+        EnemyStatsText.Text = $"LV {battle.Wave}  ·  HP {(100 + (battle.Wave - 1) * 65) * (boss ? 12 : 1):N0}  ·  ATK {(12 + (battle.Wave - 1) * 7) * (boss ? 3 : 1):N0}";
+
+        var secondsLeft = Math.Max(0, (battle.NextWaveAt - DateTime.UtcNow).TotalSeconds);
+        var waveProgress = battle.Paused ? WaveProgressBar.Value : Math.Clamp(1 - secondsLeft / 12, 0, 1);
+        TopWaveBar.Value = waveProgress;
         if (boss && battle.Boss is not null)
         {
-            BossHealthBar.Visibility = Visibility.Visible; BossHealthBar.Maximum = battle.Boss.MaxHealth; BossHealthBar.Value = Math.Clamp(battle.Boss.Health, 0, battle.Boss.MaxHealth);
-            BossTimeText.Visibility = Visibility.Visible; BossTimeText.Text = battle.Paused ? "Boss paused" : $"Deadline · {Math.Max(0, (int)Math.Ceiling((battle.Boss.Deadline - DateTime.UtcNow).TotalSeconds))}s";
+            BossHealthBar.Visibility = Visibility.Visible; WaveProgressBar.Visibility = Visibility.Collapsed;
+            BossHealthBar.Maximum = battle.Boss.MaxHealth; BossHealthBar.Value = Math.Clamp(battle.Boss.Health, 0, battle.Boss.MaxHealth);
+            BattleStatusText.Text = battle.Paused ? "Boss fight paused"
+                : $"Rift Warden · {Math.Max(0, battle.Boss.Health):N0} / {battle.Boss.MaxHealth:N0} HP · {Math.Max(0, (int)Math.Ceiling((battle.Boss.Deadline - DateTime.UtcNow).TotalSeconds))}s left";
         }
-        else { BossHealthBar.Visibility = Visibility.Collapsed; BossTimeText.Visibility = Visibility.Collapsed; BattleStatusText.Text = battle.PrepareBoss ? "Farm this level; return when ready." : battle.Paused ? "Expedition paused" : $"Next wave in {Math.Max(0, (int)Math.Ceiling((battle.NextWaveAt - DateTime.UtcNow).TotalSeconds))}s"; }
-        ArmorList.ItemsSource = battle.Armor.OrderByDescending(ArmorScore).ToList(); WaveSummaryText.Text = $"Wave {battle.Wave}"; RenderArena();
+        else
+        {
+            BossHealthBar.Visibility = Visibility.Collapsed; WaveProgressBar.Visibility = Visibility.Visible;
+            WaveProgressBar.Value = waveProgress;
+            BattleStatusText.Text = battle.Paused ? "Expedition paused"
+                : battle.PrepareBoss ? $"Farming for gear · next drop roll in {(int)Math.Ceiling(secondsLeft)}s"
+                : $"Next wave in {(int)Math.Ceiling(secondsLeft)}s";
+        }
+        RenderArena();
     }
 
     private void RenderArena()
     {
         if (ArenaCanvas is null || ArenaCanvas.ActualWidth < 10) return;
         var wave = Math.Max(1, _state.Battler.Wave); var biome = Biomes[((wave - 1) / 5) % Biomes.Length]; var boss = !_state.Battler.PrepareBoss && wave % 20 == 0;
-        BiomeText.Text = biome.Name; MonsterNameText.Text = boss ? "Rift Warden" : $"{MonsterAdjectives[(wave * 3 + wave / 5) % MonsterAdjectives.Length]} {MonsterForms[(wave * 7 + wave / 2) % MonsterForms.Length]}";
-        MonsterGlyphText.Text = boss ? "♜" : wave % 3 == 0 ? "◈" : "◆"; var sky = ColorFrom(biome.Sky); var ground = ColorFrom(biome.Ground); var glow = ColorFrom(biome.Glow);
+        BiomeText.Text = biome.Name.ToUpperInvariant();
+        MonsterNameText.Text = boss ? "Rift Warden" : $"{MonsterAdjectives[(wave * 3 + wave / 5) % MonsterAdjectives.Length]} {MonsterForms[(wave * 7 + wave / 2) % MonsterForms.Length]}";
+        MonsterGlyphText.Text = boss ? "♜" : wave % 3 == 0 ? "◈" : "◆";
+        var sky = ColorFrom(biome.Sky); var ground = ColorFrom(biome.Ground); var glow = ColorFrom(biome.Glow);
         ArenaCard.Background = new LinearGradientBrush(sky, ground, 90); MonsterGlyphText.Foreground = new SolidColorBrush(glow);
         if (_lastArenaWave == wave) return;
         _lastArenaWave = wave; ArenaCanvas.Children.Clear(); var random = new Random(wave * 37); var width = ArenaCanvas.ActualWidth; var height = ArenaCanvas.ActualHeight;
-        var moon = new Ellipse { Width = 70, Height = 70, Fill = new SolidColorBrush(glow), Opacity = .35 }; Canvas.SetLeft(moon, width * .73); Canvas.SetTop(moon, 25 + random.Next(25)); ArenaCanvas.Children.Add(moon);
+        var moon = new Ellipse { Width = 80, Height = 80, Fill = new SolidColorBrush(glow), Opacity = .3 }; Canvas.SetLeft(moon, width * .62); Canvas.SetTop(moon, 25 + random.Next(25)); ArenaCanvas.Children.Add(moon);
         for (var layer = 0; layer < 3; layer++)
         {
             var points = new PointCollection { new(0, height) }; var step = width / 8;
-            for (var i = 0; i <= 8; i++) points.Add(new Point(i * step, height * (.42 + random.NextDouble() * .2) + layer * 8));
+            for (var i = 0; i <= 8; i++) points.Add(new Point(i * step, height * (.48 + random.NextDouble() * .2) + layer * 10));
             points.Add(new Point(width, height));
-            ArenaCanvas.Children.Add(new Polygon { Points = points, Fill = new SolidColorBrush(layer == 0 ? Color.FromRgb(17, 24, 20) : ground), Opacity = .45 + layer * .16 });
+            ArenaCanvas.Children.Add(new Polygon { Points = points, Fill = new SolidColorBrush(layer == 0 ? Color.FromRgb(17, 20, 18) : ground), Opacity = .45 + layer * .16 });
         }
         var monster = new Polygon { Points = new PointCollection([new(0, 36), new(18, 8), new(35, 25), new(53, 0), new(70, 27), new(92, 14), new(100, 54), new(82, 68), new(93, 115), new(60, 98), new(43, 130), new(25, 92), new(3, 108), new(18, 68)]), Fill = new LinearGradientBrush(glow, Color.FromRgb(38, 49, 39), 90) };
-        Canvas.SetLeft(monster, width * .7); Canvas.SetTop(monster, Math.Max(0, height - 145)); ArenaCanvas.Children.Add(monster);
+        Canvas.SetLeft(monster, width * .78); Canvas.SetTop(monster, Math.Max(0, height - 150)); ArenaCanvas.Children.Add(monster);
     }
 
     private static Color ColorFrom(string value) => (Color)ColorConverter.ConvertFromString(value)!;
-}
-
-internal sealed record EventRow(EventModel Event, string GameName)
-{
-    public string Summary => $"{Event.Title} · {GameName} · {Event.Starts:MMM d}–{Event.Ends:MMM d} · {(Event.Done ? "Completed" : "Upcoming")}";
 }

@@ -1,12 +1,13 @@
 {
   "version": 2,
-  "dgSpecHash": "h89jYuduF/I=",
+  "dgSpecHash": "YNYJ1Al/gx8=",
   "success": true,
-  "projectFilePath": "C:\\Users\\Airi\\GameEventTracker\\AiriDesktop\\AiriDesktop.csproj",
+  "projectFilePath": "C:\\Users\\Joshn\\AbyGame\\game123\\GameEventTracker\\AiriDesktop\\AiriDesktop.csproj",
   "expectedPackageFiles": [
-    "C:\\Users\\Airi\\.nuget\\packages\\microsoft.netcore.app.runtime.win-x64\\8.0.33\\microsoft.netcore.app.runtime.win-x64.8.0.33.nupkg.sha512",
-    "C:\\Users\\Airi\\.nuget\\packages\\microsoft.windowsdesktop.app.runtime.win-x64\\8.0.33\\microsoft.windowsdesktop.app.runtime.win-x64.8.0.33.nupkg.sha512",
-    "C:\\Users\\Airi\\.nuget\\packages\\microsoft.aspnetcore.app.runtime.win-x64\\8.0.33\\microsoft.aspnetcore.app.runtime.win-x64.8.0.33.nupkg.sha512"
+    "C:\\Users\\Joshn\\.nuget\\packages\\wpfanimatedgif\\2.0.2\\wpfanimatedgif.2.0.2.nupkg.sha512",
+    "C:\\Users\\Joshn\\.nuget\\packages\\microsoft.netcore.app.runtime.win-x64\\8.0.33\\microsoft.netcore.app.runtime.win-x64.8.0.33.nupkg.sha512",
+    "C:\\Users\\Joshn\\.nuget\\packages\\microsoft.windowsdesktop.app.runtime.win-x64\\8.0.33\\microsoft.windowsdesktop.app.runtime.win-x64.8.0.33.nupkg.sha512",
+    "C:\\Users\\Joshn\\.nuget\\packages\\microsoft.aspnetcore.app.runtime.win-x64\\8.0.33\\microsoft.aspnetcore.app.runtime.win-x64.8.0.33.nupkg.sha512"
   ],
   "logs": []
 }

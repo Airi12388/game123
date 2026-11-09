@@ -1,20 +1,20 @@
 {
   "format": 1,
   "restore": {
-    "C:\\Users\\Airi\\GameEventTracker\\AiriDesktop\\AiriDesktop.csproj": {}
+    "C:\\Users\\Joshn\\AbyGame\\game123\\GameEventTracker\\AiriDesktop\\AiriDesktop.csproj": {}
   },
   "projects": {
-    "C:\\Users\\Airi\\GameEventTracker\\AiriDesktop\\AiriDesktop.csproj": {
+    "C:\\Users\\Joshn\\AbyGame\\game123\\GameEventTracker\\AiriDesktop\\AiriDesktop.csproj": {
       "version": "1.0.0",
       "restore": {
-        "projectUniqueName": "C:\\Users\\Airi\\GameEventTracker\\AiriDesktop\\AiriDesktop.csproj",
+        "projectUniqueName": "C:\\Users\\Joshn\\AbyGame\\game123\\GameEventTracker\\AiriDesktop\\AiriDesktop.csproj",
         "projectName": "AiriDesktop",
-        "projectPath": "C:\\Users\\Airi\\GameEventTracker\\AiriDesktop\\AiriDesktop.csproj",
-        "packagesPath": "C:\\Users\\Airi\\.nuget\\packages\\",
-        "outputPath": "C:\\Users\\Airi\\GameEventTracker\\AiriDesktop\\obj\\",
+        "projectPath": "C:\\Users\\Joshn\\AbyGame\\game123\\GameEventTracker\\AiriDesktop\\AiriDesktop.csproj",
+        "packagesPath": "C:\\Users\\Joshn\\.nuget\\packages\\",
+        "outputPath": "C:\\Users\\Joshn\\AbyGame\\game123\\GameEventTracker\\AiriDesktop\\obj\\",
         "projectStyle": "PackageReference",
         "configFilePaths": [
-          "C:\\Users\\Airi\\AppData\\Roaming\\NuGet\\NuGet.Config"
+          "C:\\Users\\Joshn\\AppData\\Roaming\\NuGet\\NuGet.Config"
         ],
         "originalTargetFrameworks": [
           "net8.0-windows"
@@ -42,6 +42,12 @@
       "frameworks": {
         "net8.0-windows7.0": {
           "targetAlias": "net8.0-windows",
+          "dependencies": {
+            "WpfAnimatedGif": {
+              "target": "Package",
+              "version": "[2.0.2, )"
+            }
+          },
           "imports": [
             "net461",
             "net462",
@@ -75,7 +81,7 @@
               "privateAssets": "none"
             }
           },
-          "runtimeIdentifierGraphPath": "C:\\Users\\Airi\\.dotnet\\sdk\\8.0.427/PortableRuntimeIdentifierGraph.json"
+          "runtimeIdentifierGraphPath": "C:\\Program Files\\dotnet\\sdk\\8.0.427/PortableRuntimeIdentifierGraph.json"
         }
       },
       "runtimes": {

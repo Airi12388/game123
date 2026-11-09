@@ -93,10 +93,4 @@ internal sealed class ArmorModel
 }
 
 internal sealed record CharacterModel(string Id, string Name, string Source, int Rarity, string Color);
-internal sealed record WeeklyGoalModel(string Id, string Title, int Progress, int Target, int Reward, bool Claimed)
-{
-    public string Summary => $"{(Claimed ? "✓" : "○")}  {Title}  ·  {Progress}/{Target}  ·  +{Reward} P";
-}
-internal sealed record PartyMemberModel(string Id, string Name, string Source, int Rarity, int Copies, string Summary);
-internal sealed record CharacterCardModel(string Id, string Name, string Detail, string AccountLabel, string Initials, int Rarity, System.Windows.Media.ImageSource? Portrait);
 internal sealed record FighterStats(double Hp, double Attack, double Crit, double Armor);

@@ -981,7 +981,7 @@
 
                         <!-- Collection header + filters -->
                         <DockPanel Margin="0,0,0,14">
-                            <TextBlock DockPanel.Dock="Right" Text="Double-click a card to give it art · PNG, JPG or GIF" Style="{StaticResource MutedText}" VerticalAlignment="Bottom" />
+                            <TextBlock DockPanel.Dock="Right" Text="Drag a picture onto a card, or double-click it · PNG, JPG or GIF" Style="{StaticResource MutedText}" VerticalAlignment="Bottom" />
                             <StackPanel Orientation="Horizontal">
                                 <TextBlock Text="Your collection" Style="{StaticResource H1}" />
                                 <Border Style="{StaticResource CountBadge}"><TextBlock x:Name="CollectionCountText" Text="0/45" Style="{StaticResource MonoSmall}" /></Border>
@@ -1016,8 +1016,9 @@
                             </Border>
                         </StackPanel>
 
-                        <ListBox x:Name="CharactersList" Style="{StaticResource CardGrid}" ItemTemplate="{StaticResource CharacterCard}"
-                                 SelectionChanged="CharactersList_SelectionChanged" MouseDoubleClick="CharactersList_MouseDoubleClick" />
+                        <ListBox x:Name="CharactersList" Style="{StaticResource CardGrid}" ItemTemplate="{StaticResource CharacterCard}" AllowDrop="True"
+                                 SelectionChanged="CharactersList_SelectionChanged" MouseDoubleClick="CharactersList_MouseDoubleClick"
+                                 DragOver="CharactersList_DragOver" Drop="CharactersList_Drop" />
                     </StackPanel>
                 </ScrollViewer>
 
@@ -1087,10 +1088,12 @@
                             <Border Height="1" Background="{StaticResource Line}" Margin="0,20" />
                             <TextBlock Text="CARD ART" Style="{StaticResource Kicker}" Foreground="{StaticResource Muted}" Margin="0,0,0,8" />
                             <TextBlock x:Name="SelectedCardText" Text="Select a card" FontWeight="Bold" FontSize="15" />
-                            <TextBlock Text="Choose a PNG, JPG or animated GIF from this PC. Images stay on this device; use art you have permission to use."
-                                       Style="{StaticResource MutedText}" FontSize="12" Margin="0,4,0,12" />
+                            <TextBlock x:Name="SelectedCardFileText" Style="{StaticResource MonoSmall}" Foreground="{StaticResource Orange}" Margin="0,3,0,0" />
+                            <TextBlock Text="Save a PNG, JPG or GIF from your browser, then drag it onto the card. Or drop files named after the character into the art folder; they appear when you reopen this tab. Pictures stay on this PC."
+                                       Style="{StaticResource MutedText}" FontSize="12" Margin="0,6,0,12" />
                             <Button x:Name="SetArtButton" Content="Choose image or GIF…" Click="ImportPortrait_Click" IsEnabled="False" />
                             <Button x:Name="RemoveArtButton" Content="Remove art" Click="RemoveArt_Click" IsEnabled="False" Margin="0,8,0,0" Background="Transparent" />
+                            <Button Content="Open art folder" Click="OpenArtFolder_Click" Margin="0,8,0,0" Background="Transparent" />
                         </StackPanel>
                     </ScrollViewer>
                 </Border>

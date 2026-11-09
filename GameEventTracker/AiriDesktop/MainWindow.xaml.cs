@@ -294,6 +294,7 @@ public partial class MainWindow : Window
         BoostersView.Visibility = NavBoosters.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
         RiftView.Visibility = NavRift.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
         if (RiftView.Visibility == Visibility.Visible) { _lastArenaWave = -1; Dispatcher.BeginInvoke(RenderArena, DispatcherPriority.Loaded); }
+        if (BoostersView.Visibility == Visibility.Visible && _ready) RefreshCharacters(); // pick up files dropped into the art folder
     }
 
     private void EventFilter_Checked(object sender, RoutedEventArgs e)
@@ -505,6 +506,7 @@ public partial class MainWindow : Window
     {
         var character = CharacterCatalog.FirstOrDefault(c => c.Id == _selectedCharacterId);
         SelectedCardText.Text = character?.Name ?? "Select a card";
+        SelectedCardFileText.Text = character is null ? "" : $"Folder file name: {character.Id}.png / .jpg / .gif";
         SetArtButton.IsEnabled = character is not null;
         RemoveArtButton.IsEnabled = character is not null && _state.CharacterImages.ContainsKey(character.Id);
     }
@@ -538,13 +540,17 @@ public partial class MainWindow : Window
     {
         var name = CharacterCatalog.FirstOrDefault(c => c.Id == characterId)?.Name ?? "this card";
         var dialog = new OpenFileDialog { Title = $"Choose art for {name}", Filter = "Images and GIFs|*.gif;*.png;*.jpg;*.jpeg;*.bmp" };
-        if (dialog.ShowDialog(this) != true) return;
+        if (dialog.ShowDialog(this) == true) ImportArtFrom(characterId, dialog.FileName);
+    }
+
+    private void ImportArtFrom(string characterId, string sourcePath)
+    {
         try
         {
             Directory.CreateDirectory(PortraitFolder);
             // A fresh file name each time, so a GIF that is still playing never blocks the replacement.
-            var destination = Path.Combine(PortraitFolder, $"{characterId}-{DateTime.Now:yyyyMMddHHmmss}{Path.GetExtension(dialog.FileName).ToLowerInvariant()}");
-            File.Copy(dialog.FileName, destination, true);
+            var destination = Path.Combine(PortraitFolder, $"{characterId}-{DateTime.Now:yyyyMMddHHmmss}{Path.GetExtension(sourcePath).ToLowerInvariant()}");
+            File.Copy(sourcePath, destination, true);
             if (LoadPortrait(destination) is null)
             {
                 TryDelete(destination);
@@ -563,6 +569,32 @@ public partial class MainWindow : Window
         }
     }
 
+    private static readonly string[] ImageExtensions = [".gif", ".png", ".jpg", ".jpeg", ".bmp"];
+
+    private static string? DroppedImage(DragEventArgs e) =>
+        e.Data.GetData(DataFormats.FileDrop) is string[] files
+            ? files.FirstOrDefault(f => ImageExtensions.Contains(Path.GetExtension(f).ToLowerInvariant()))
+            : null;
+
+    private void CharactersList_DragOver(object sender, DragEventArgs e)
+    {
+        e.Effects = DroppedImage(e) is not null && (e.OriginalSource as FrameworkElement)?.DataContext is CharacterCardModel ? DragDropEffects.Copy : DragDropEffects.None;
+        e.Handled = true;
+    }
+
+    private void CharactersList_Drop(object sender, DragEventArgs e)
+    {
+        if (DroppedImage(e) is not { } file || (e.OriginalSource as FrameworkElement)?.DataContext is not CharacterCardModel card) return;
+        _selectedCharacterId = card.Id;
+        ImportArtFrom(card.Id, file);
+    }
+
+    private void OpenArtFolder_Click(object sender, RoutedEventArgs e)
+    {
+        Directory.CreateDirectory(LibraryFolder);
+        System.Diagnostics.Process.Start("explorer.exe", LibraryFolder);
+    }
+
     private void RemoveArt(string characterId)
     {
         if (!_state.CharacterImages.Remove(characterId, out var old)) return;
@@ -575,9 +607,15 @@ public partial class MainWindow : Window
         try { File.Delete(path); } catch { /* still in use; harmless leftover */ }
     }
 
+    private static readonly string LibraryFolder = Path.Combine(PortraitFolder, "library");
+    private static readonly string[] LibraryExtensions = [".gif", ".png", ".jpg", ".jpeg"];
+
+    /// <summary>Your own imported art wins; otherwise fall back to portraits\library\{id}.* (drop files named after the character id, e.g. ellen.png).</summary>
     private ImageSource? Portrait(string characterId)
     {
         var path = _state.CharacterImages.GetValueOrDefault(characterId);
+        if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
+            path = LibraryExtensions.Select(ext => Path.Combine(LibraryFolder, characterId + ext)).FirstOrDefault(File.Exists);
         if (string.IsNullOrWhiteSpace(path)) return null;
         if (!_portraitCache.TryGetValue(path, out var image)) _portraitCache[path] = image = LoadPortrait(path);
         return image;

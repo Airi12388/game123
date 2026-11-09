@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("AiriDesktop")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Release")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+dde26e10f65732f8ae1cdda9c3a7986e62e2c345")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+4bc7050001525f58f0a67a360928270e880d4617")]
 [assembly: System.Reflection.AssemblyProductAttribute("AiriDesktop")]
 [assembly: System.Reflection.AssemblyTitleAttribute("AiriDesktop")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]

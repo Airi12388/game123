@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="en">
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<meta name="theme-color" content="#111712">
+	<title>Airi's - your games, in time</title>
+	<link rel="preconnect" href="https://fonts.googleapis.com">
+	<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+	<link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+	<link rel="stylesheet" href="styles.css">
+	<script src="app.js" defer></script>
+</head>
+<body>
+	<div class="app-shell">
+		<header class="topbar">
+			<a class="wordmark" href="#top" aria-label="Airi's home"><span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span><span>AIRI'S<span class="wordmark-period">.</span></span></a>
+			<div class="wallet" aria-label="Currency balance"><span class="coin" aria-hidden="true">P</span><span id="wallet-balance">0</span><span class="wallet-label">PULSE</span></div>
+		</header>
+
+		<main id="top">
+			<section class="intro">
+				<div class="intro-copy"><p class="eyebrow"><span class="eyebrow-line"></span> YOUR PERSONAL GAME CALENDAR</p></div>
+				<div class="intro-note"><p>Events worth catching. Dailies worth clearing.</p><button class="button button-dark" id="open-event-form" type="button"><span aria-hidden="true">+</span> Add event</button></div>
+			</section>
+
+			<section class="summary" aria-label="Your progress">
+				<div class="summary-item"><span class="summary-label">ON THE HORIZON</span><strong id="summary-upcoming">0</strong><span>upcoming events</span></div>
+				<div class="summary-item"><span class="summary-label">TODAY'S CLEAR</span><strong id="summary-quests">0/0</strong><span>daily quests</span></div>
+				<div class="summary-item summary-date"><span class="summary-label">TODAY</span><strong id="today-label">--</strong><span>keep your streak alive</span></div>
+			</section>
+
+			<nav class="app-tabs" role="tablist" aria-label="Playlog views">
+				<button class="app-tab is-active" id="tracker-tab" type="button" role="tab" aria-selected="true" aria-controls="tracker-panel" data-view-tab="tracker">Tracker</button>
+				<button class="app-tab" id="gacha-tab" type="button" role="tab" aria-selected="false" aria-controls="gacha-panel-view" data-view-tab="gacha" tabindex="-1">Signal booth <span id="tab-pulse">0 P</span></button>
+				<button class="app-tab" id="battler-tab" type="button" role="tab" aria-selected="false" aria-controls="battler-panel-view" data-view-tab="battler" tabindex="-1">Idle battler <span id="tab-wave">W1</span></button>
+			</nav>
+			<section id="tracker-panel" class="tab-panel" role="tabpanel" aria-labelledby="tracker-tab" data-tab-panel="tracker">
+			<div class="section-heading">
+				<div><p class="eyebrow">YOUR LIBRARY</p><h2>Games & events</h2></div>
+				<button class="text-button" id="open-game-form" type="button"><span aria-hidden="true">+</span> Add a game</button>
+			</div>
+
+			<section class="content-grid">
+				<aside class="game-sidebar">
+					<span class="panel-kicker">YOUR LIBRARY</span>
+					<h3>Games</h3>
+					<nav class="game-filters" id="game-filters" aria-label="Filter events by game"></nav>
+				</aside>
+
+				<div class="events-panel">
+					<div class="panel-heading">
+						<div><span class="panel-kicker">YOUR CALENDAR</span><h3>Event radar <span id="event-count" class="count-badge">0</span></h3></div>
+						<div class="filter-tabs" role="group" aria-label="Filter events">
+							<button type="button" class="filter-tab is-active" data-event-filter="all">All</button>
+							<button type="button" class="filter-tab" data-event-filter="upcoming">Upcoming</button>
+							<button type="button" class="filter-tab" data-event-filter="done">Done</button>
+						</div>
+					</div>
+					<p class="event-bonus-note">Event clears earn <strong>+100 Pulse</strong></p>
+					<div id="events-list" class="events-list"></div>
+				</div>
+
+				<aside class="quests-panel">
+					<div class="quest-heading"><div><span class="panel-kicker">A LITTLE PROGRESS ADDS UP</span><h3>Daily quests <span class="spark" aria-hidden="true">✳</span></h3></div><span class="reset-label">RESETS DAILY</span></div>
+					<p class="quest-intro">Clear a quest to earn Pulse. One reward per quest, each day.</p>
+					<div class="quest-game-select"><label for="quest-game">PLAYING</label><select id="quest-game" aria-label="Choose a game for daily quests"></select></div>
+					<div id="quests-list" class="quests-list"></div>
+					<div class="weekly-heading"><div><span class="panel-kicker">WEEKLY GOALS</span><h4>Long game <span id="weekly-progress-count" class="count-badge">0/3</span></h4></div><span class="reset-label">RESETS MON</span></div>
+					<div id="weekly-list" class="weekly-list"></div>
+					<button class="button button-outline quest-add" id="open-quest-form" type="button"><span aria-hidden="true">+</span> Add a daily quest</button>
+					<div class="currency-note"><span class="coin coin-small" aria-hidden="true">P</span><span>Spend Pulse at the Signal booth.</span></div>
+				</aside>
+			</section>
+			</section>
+
+			<section id="gacha-panel-view" class="tab-panel" role="tabpanel" aria-labelledby="gacha-tab" data-tab-panel="gacha" hidden>
+			<section class="gacha-panel" aria-labelledby="gacha-title">
+				<div class="gacha-heading">
+					<div><p class="eyebrow">PULSE EXCHANGE</p><h2 id="gacha-title">Signal booth</h2><p class="gacha-subtitle">Original generated portraits, not official game art. Playlog rarity and rates are independent of the original games.</p></div>
+					<div class="gacha-actions">
+						<div class="pity-readout"><span>5★ guarantee <strong id="pity-five">50</strong> pulls</span><span>4★ guarantee <strong id="pity-four">10</strong> pulls</span></div>
+						<div class="pull-buttons"><button class="button button-dark" id="pull-one" type="button">Pull 1 <span>100 P</span></button><button class="button button-outline" id="pull-ten" type="button">Pull 10 <span>900 P</span></button></div>
+					</div>
+				</div>
+				<div class="gacha-rates"><span>5★ <strong>6%</strong></span><span>4★ <strong>24%</strong></span><span>3★ <strong>70%</strong></span><span>10-pull discount applied</span></div>
+				<div id="gacha-result" class="gacha-result" role="status" aria-live="polite">Earn Pulse from daily quests and event clears to pull.</div>
+				<div class="collection-heading"><div><span class="panel-kicker">AVAILABLE POOL</span><h3>Characters <span id="collection-count" class="count-badge">0</span></h3></div><span class="owned-note">Only pulled characters join your account</span></div>
+				<div class="portrait-controls"><label for="portrait-character">Character</label><select id="portrait-character" aria-label="Choose a character for your local picture"></select><label class="portrait-file-label" for="portrait-file">Use a picture from this device</label><input id="portrait-file" type="file" accept="image/*" aria-label="Choose a character picture from this device"><button id="clear-portrait" class="button button-outline" type="button" disabled>Remove local picture</button></div>
+				<div id="collection-list" class="character-grid"></div>
+			</section>
+			</section>
+
+			<section id="battler-panel-view" class="tab-panel" role="tabpanel" aria-labelledby="battler-tab" data-tab-panel="battler" hidden>
+				<section class="battler-panel" aria-labelledby="battler-title">
+					<div class="battler-heading"><div><p class="eyebrow">AUTO EXPEDITION</p><h2 id="battler-title">Rift descent</h2><p class="battler-subtitle">Waves continue while Playlog is open. Progress is also saved between visits.</p></div><button id="battle-toggle" class="button button-outline" type="button">Pause battle</button></div>
+					<div class="arena-scene" id="arena-scene" aria-label="Generated battler environment">
+						<div class="arena-haze"></div><div class="arena-ridge arena-ridge-back"></div><div class="arena-ridge arena-ridge-front"></div>
+						<div id="generated-monster" class="generated-monster" role="img" aria-label="Generated rift monster"><span class="monster-eye monster-eye-left"></span><span class="monster-eye monster-eye-right"></span><span class="monster-mark"></span></div>
+						<div class="arena-caption"><span id="arena-biome">Mosslight Ruins</span><strong id="generated-monster-name">Rift scout</strong></div>
+					</div>
+					<div class="battle-stage">
+						<div class="battle-crest" aria-hidden="true"><span id="battle-crest-icon">⚔</span></div>
+						<div class="battle-readout"><span class="panel-kicker" id="battle-phase">WAVE 1 / 19</span><strong id="battle-opponent">Rift scout</strong><span id="battle-enemy-stats">Level 1 · HP 100 · ATK 12</span><span id="battle-countdown">Next wave in 12s</span></div>
+						<div class="battle-progress"><span id="battle-progress-bar"></span></div>
+						<div id="boss-health-wrap" class="boss-health" hidden><div><span>RIFT WARDEN</span><strong id="boss-health-label">0 / 0</strong></div><div class="boss-health-bar"><span id="boss-health-bar"></span></div></div>
+					</div>
+					<div id="boss-failure-controls" class="boss-failure-controls" hidden role="status"><span id="boss-failure-note">Boss not defeated. Farm the previous wave for gear, then return.</span><button id="return-to-boss" class="button button-outline" type="button">Return to boss wave</button></div>
+					<div id="battle-log" class="battle-log" role="log" aria-live="polite"></div>
+					<section class="fighter-sheet" aria-label="Active party and combined stats">
+						<div class="fighter-identity"><div class="party-emblem" aria-hidden="true">✦</div><div class="fighter-choice"><label>ACTIVE PARTY</label><strong id="battle-party-name">Rift Runner</strong><span id="battle-party-count">Starter unit</span></div></div>
+						<div id="battle-party-list" class="battle-party-list"></div>
+						<div id="battle-character-stats" class="fighter-stats"></div>
+					</section>
+					<div class="loadout-heading"><div><span class="panel-kicker">EQUIPPED GEAR</span><h3>Loadout <span class="count-badge">11</span></h3></div><span class="owned-note">Stats recalculate with every change</span></div>
+					<div id="battle-equipment" class="equipment-grid"></div>
+					<div class="armory-heading"><div><span class="panel-kicker">EXPEDITION LOOT</span><h3>Armory <span id="armor-count" class="count-badge">0</span></h3></div><span class="material-total"><span aria-hidden="true">◆</span> <strong id="material-count">0</strong> alloy</span></div>
+					<div id="armor-list" class="armor-list"></div>
+				</section>
+			</section>
+
+			<footer class="app-footer"><span>AIRI'S / PERSONAL TRACKER</span><span>YOUR DATA STAYS IN THIS BROWSER</span></footer>
+		</main>
+	</div>
+
+	<dialog id="event-dialog" class="form-dialog">
+		<form id="event-form">
+			<div class="dialog-heading"><div><span class="panel-kicker">ADD TO YOUR CALENDAR</span><h2>New event</h2></div><button class="close-button" type="button" data-close-dialog aria-label="Close">×</button></div>
+			<label>Event name<input name="title" required maxlength="70" placeholder="e.g. Double XP weekend"></label>
+			<label>Game<select name="gameId" required></select></label>
+			<div class="date-fields"><label>Starts<input name="startDate" type="date" required></label><label>Ends<input name="endDate" type="date" required></label></div>
+			<p class="form-error" aria-live="polite"></p>
+			<div class="dialog-actions"><button class="button button-outline" type="button" data-close-dialog>Cancel</button><button class="button button-dark" type="submit">Save event</button></div>
+		</form>
+	</dialog>
+
+	<dialog id="game-dialog" class="form-dialog">
+		<form id="game-form">
+			<div class="dialog-heading"><div><span class="panel-kicker">GROW YOUR LIBRARY</span><h2>New game</h2></div><button class="close-button" type="button" data-close-dialog aria-label="Close">×</button></div>
+			<label>Game name<input name="name" required maxlength="40" placeholder="What are you playing?"></label>
+			<p class="form-hint">We'll add a few starter dailies. You can customize them anytime.</p>
+			<div class="dialog-actions"><button class="button button-outline" type="button" data-close-dialog>Cancel</button><button class="button button-dark" type="submit">Add game</button></div>
+		</form>
+	</dialog>
+
+	<dialog id="quest-dialog" class="form-dialog">
+		<form id="quest-form">
+			<div class="dialog-heading"><div><span class="panel-kicker">MAKE IT YOURS</span><h2>New daily quest</h2></div><button class="close-button" type="button" data-close-dialog aria-label="Close">×</button></div>
+			<label>Quest name<input name="title" required maxlength="70" placeholder="e.g. Play one match"></label>
+			<label>Game<select name="gameId" required></select></label>
+			<label>Pulse reward<input name="reward" type="number" min="1" max="1000" value="25" required></label>
+			<div class="dialog-actions"><button class="button button-outline" type="button" data-close-dialog>Cancel</button><button class="button button-dark" type="submit">Add quest</button></div>
+		</form>
+	</dialog>
+
+	<div id="toast" class="toast" role="status" aria-live="polite"></div>
+</body>
+</html>

@@ -4,7 +4,7 @@
         xmlns:gif="http://wpfanimatedgif.codeplex.com"
         Title="Airi's" Height="940" Width="1480" MinHeight="760" MinWidth="1200"
         WindowStartupLocation="CenterScreen" Background="#0D0D10" Foreground="#F2F2F5"
-        FontFamily="Segoe UI" FontSize="13" UseLayoutRounding="True">
+        FontFamily="Segoe UI" FontSize="13" UseLayoutRounding="True" PreviewKeyDown="Window_PreviewKeyDown">
     <Window.Resources>
         <!-- ===== Palette ===== -->
         <SolidColorBrush x:Key="Panel" Color="#16161B" />
@@ -1014,6 +1014,7 @@
                             <Border Style="{StaticResource SegmentBox}" Margin="10,0,0,0">
                                 <ToggleButton x:Name="OwnedOnlyToggle" Style="{StaticResource FilterChip}" Content="Owned only" Checked="OwnedOnly_Changed" Unchecked="OwnedOnly_Changed" />
                             </Border>
+                            <ComboBox x:Name="SeriesFilterInput" Width="220" Margin="10,0,0,0" VerticalAlignment="Center" SelectionChanged="SeriesFilter_Changed" ToolTip="Filter by series" />
                         </StackPanel>
 
                         <ListBox x:Name="CharactersList" Style="{StaticResource CardGrid}" ItemTemplate="{StaticResource CharacterCard}" AllowDrop="True"
@@ -1218,6 +1219,61 @@
                     </Grid>
                 </StackPanel>
             </ScrollViewer>
+        </Grid>
+
+        <!-- ================= PULL REVEAL OVERLAY ================= -->
+        <Grid x:Name="PullOverlay" Grid.RowSpan="3" Visibility="Collapsed" Panel.ZIndex="100" Background="#F2060608" MouseLeftButtonDown="PullOverlay_MouseDown">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition />
+                <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
+            <Ellipse x:Name="PullGlow" Grid.RowSpan="3" Width="1000" Height="1000" Opacity="0" IsHitTestVisible="False" />
+
+            <StackPanel x:Name="PullHeader" Grid.Row="0" HorizontalAlignment="Center" Margin="0,34,0,0" Opacity="0">
+                <TextBlock Text="SIGNAL ACQUIRED" Style="{StaticResource Kicker}" FontSize="13" HorizontalAlignment="Center" />
+                <TextBlock x:Name="PullSummaryText" FontFamily="{StaticResource Display}" FontSize="32" HorizontalAlignment="Center" Margin="0,6,0,0" />
+            </StackPanel>
+
+            <!-- The pack -->
+            <Grid x:Name="PackRoot" Grid.Row="1" Width="230" Height="340" HorizontalAlignment="Center" VerticalAlignment="Center" IsHitTestVisible="False">
+                <Border CornerRadius="14" BorderThickness="2" BorderBrush="#FFE27A">
+                    <Border.Background>
+                        <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
+                            <GradientStop Color="#FFE15A" Offset="0" />
+                            <GradientStop Color="#F5C518" Offset=".45" />
+                            <GradientStop Color="#C98A12" Offset="1" />
+                        </LinearGradientBrush>
+                    </Border.Background>
+                    <Grid>
+                        <TextBlock Text="信" FontSize="230" FontWeight="Bold" Foreground="#14000000" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="0,0,0,10" />
+                        <StackPanel VerticalAlignment="Center">
+                            <TextBlock Text="AIRI'S" FontFamily="{StaticResource Mono}" FontWeight="Bold" FontSize="13" Foreground="#3A2A05" HorizontalAlignment="Center" Margin="0,10,0,16" />
+                            <Border Width="112" Height="112" CornerRadius="56" Background="#1A1405" BorderBrush="#FFF1B8" BorderThickness="4">
+                                <TextBlock Text="信" FontSize="56" FontWeight="Bold" Foreground="{StaticResource Yellow}" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                            </Border>
+                            <TextBlock Text="Signal Mix" FontFamily="{StaticResource Display}" FontSize="25" Foreground="#2A1F04" HorizontalAlignment="Center" Margin="0,16,0,2" />
+                            <TextBlock Text="Every character" FontSize="11" Foreground="#5A4510" HorizontalAlignment="Center" />
+                            <Border Background="#1A1405" CornerRadius="10" Padding="11,3" HorizontalAlignment="Center" Margin="0,12,0,0">
+                                <TextBlock x:Name="PackCountText" Text="10 cards" FontFamily="{StaticResource Mono}" FontSize="11" Foreground="{StaticResource Yellow}" />
+                            </Border>
+                        </StackPanel>
+                        <Border VerticalAlignment="Bottom" Height="22" CornerRadius="0,0,12,12" Background="#30000000" />
+                    </Grid>
+                </Border>
+                <Border x:Name="PackTear" VerticalAlignment="Top" Height="26" CornerRadius="12,12,0,0" Background="#D9A514" BorderBrush="#FFE27A" BorderThickness="2,2,2,0">
+                    <TextBlock Text="◆  ◆  ◆  ◆  ◆  ◆  ◆" Foreground="#99FFF1B8" FontSize="8" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                </Border>
+            </Grid>
+
+            <WrapPanel x:Name="PullCardsPanel" Grid.Row="1" HorizontalAlignment="Center" VerticalAlignment="Center" />
+
+            <StackPanel Grid.Row="2" HorizontalAlignment="Center" Margin="0,0,0,34">
+                <Button x:Name="PullContinueButton" Style="{StaticResource PrimaryButton}" Content="Continue" Click="PullContinue_Click" Padding="52,12" Opacity="0" IsHitTestVisible="False" />
+                <TextBlock x:Name="PullHintText" Text="Click anywhere to skip" Foreground="{StaticResource Muted}" FontSize="12" HorizontalAlignment="Center" Margin="0,10,0,0" />
+            </StackPanel>
+
+            <Border x:Name="PullFlash" Grid.RowSpan="3" Background="White" Opacity="0" IsHitTestVisible="False" />
         </Grid>
     </Grid>
 </Window>

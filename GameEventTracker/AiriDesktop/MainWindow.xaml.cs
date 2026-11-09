@@ -5,6 +5,8 @@ using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Input;
 using System.Windows.Media;
+using System.Windows.Media.Animation;
+using System.Windows.Media.Effects;
 using System.Windows.Media.Imaging;
 using System.Windows.Threading;
 using Microsoft.Win32;
@@ -60,32 +62,15 @@ public partial class MainWindow : Window
     private static readonly string[] MonsterAdjectives = ["Shardbound", "Cinder-veiled", "Gloam-marked", "Frost-bitten", "Hollowglass"];
     private static readonly string[] MonsterForms = ["Riftling", "Gloomstalker", "Obelisk brute", "Veil sentinel", "Shard fiend"];
     private static readonly CharacterModel StarterFighter = new("rift-runner", "Rift Runner", "Airi's starter", 3, "#87B878");
-    private static readonly CharacterModel[] CharacterCatalog =
-    [
-        new("naruto", "Naruto Uzumaki", "Naruto", 5, "#D98545"), new("sailor-moon", "Sailor Moon", "Sailor Moon", 5, "#D881A8"),
-        new("tanjiro", "Tanjiro Kamado", "Demon Slayer", 4, "#538C74"), new("anya", "Anya Forger", "Spy x Family", 3, "#C56D78"),
-        new("anby", "Anby Demara", "Zenless Zone Zero", 4, "#7594AF"), new("nicole", "Nicole Demara", "Zenless Zone Zero", 4, "#D17A98"),
-        new("ellen", "Ellen Joe", "Zenless Zone Zero", 5, "#5C8CA2"), new("miyabi", "Hoshimi Miyabi", "Zenless Zone Zero", 5, "#B77986"),
-        new("amber", "Amber", "Genshin Impact", 3, "#DB8657"), new("xiangling", "Xiangling", "Genshin Impact", 4, "#CE6850"),
-        new("furina", "Furina", "Genshin Impact", 5, "#6194B5"), new("march-7", "March 7th", "Honkai: Star Rail", 3, "#DA8B9B"),
-        new("dan-heng", "Dan Heng", "Honkai: Star Rail", 4, "#578C89"), new("kafka", "Kafka", "Honkai: Star Rail", 5, "#9E6D91"),
-        new("adelheid", "Adelheid", "Chaos Zero Nightmare", 4, "#937EAF"), new("amir", "Amir", "Chaos Zero Nightmare", 4, "#6687A1"),
-        new("cassius", "Cassius", "Chaos Zero Nightmare", 3, "#B58A54"), new("arabella", "Arabella", "Chaos Zero Nightmare", 5, "#B36971"),
-        new("levi", "Levi Ackerman", "Attack on Titan", 5, "#657B8C"), new("luffy", "Monkey D. Luffy", "One Piece", 5, "#CF6548"),
-        new("nezuko", "Nezuko Kamado", "Demon Slayer", 4, "#C97B94"), new("killua", "Killua Zoldyck", "Hunter x Hunter", 4, "#62A9BD"),
-        new("koleda", "Koleda Belobog", "Zenless Zone Zero", 4, "#D5805A"), new("zhu-yuan", "Zhu Yuan", "Zenless Zone Zero", 5, "#577AAB"),
-        new("raiden", "Raiden Shogun", "Genshin Impact", 5, "#8164AA"), new("kazuha", "Kaedehara Kazuha", "Genshin Impact", 5, "#BC7C62"),
-        new("himeko", "Himeko", "Honkai: Star Rail", 5, "#B36A53"), new("silver-wolf", "Silver Wolf", "Honkai: Star Rail", 5, "#588EC5"),
-        new("beryl", "Beryl", "Chaos Zero Nightmare", 4, "#64A078"), new("anika", "Anika", "Chaos Zero Nightmare", 3, "#BA8056"),
-        new("lisa", "Lisa", "Genshin Impact", 3, "#896DA9"), new("kaeya", "Kaeya", "Genshin Impact", 4, "#5879A7"),
-        new("navia", "Navia", "Genshin Impact", 5, "#C5A15E"), new("acheron", "Acheron", "Honkai: Star Rail", 5, "#7D668B"),
-        new("firefly", "Firefly", "Honkai: Star Rail", 5, "#6AA880"), new("pela", "Pela", "Honkai: Star Rail", 4, "#7594AF"),
-        new("jane-doe", "Jane Doe", "Zenless Zone Zero", 5, "#9D7165"), new("qingyi", "Qingyi", "Zenless Zone Zero", 5, "#69A397"),
-        new("burnice", "Burnice White", "Zenless Zone Zero", 5, "#DD774E"), new("frieren", "Frieren", "Frieren: Beyond Journey's End", 5, "#79A8A2"),
-        new("gojo", "Satoru Gojo", "Jujutsu Kaisen", 5, "#7299D1"), new("goku", "Son Goku", "Dragon Ball", 5, "#DF854B"),
-        new("rukia", "Rukia Kuchiki", "Bleach", 4, "#8293BD"), new("rengoku", "Kyojuro Rengoku", "Demon Slayer", 5, "#D57848"),
-        new("saitama", "Saitama", "One-Punch Man", 5, "#CC5C4C")
-    ];
+    // The roster lives in characters.json (embedded in the exe). Order matters: it sets each card's #number.
+    private static readonly CharacterModel[] CharacterCatalog = LoadCatalog();
+
+    private static CharacterModel[] LoadCatalog()
+    {
+        using var stream = typeof(MainWindow).Assembly.GetManifestResourceStream("characters.json")
+            ?? throw new InvalidOperationException("characters.json is missing from the build.");
+        return JsonSerializer.Deserialize<CharacterModel[]>(stream, new JsonSerializerOptions { PropertyNameCaseInsensitive = true }) ?? [];
+    }
 
     public MainWindow()
     {
@@ -98,6 +83,8 @@ public partial class MainWindow : Window
         ArenaCanvas.SizeChanged += (_, _) => { _lastArenaWave = -1; RenderArena(); };
         Closing += (_, _) => { _timer.Stop(); SaveState(); };
         EventStartInput.SelectedDate = EventEndInput.SelectedDate = DateTime.Today;
+        SeriesFilterInput.ItemsSource = new[] { AllSeries }.Concat(CharacterCatalog.Select(c => c.Source).Distinct().OrderBy(s => s)).ToList();
+        SeriesFilterInput.SelectedIndex = 0;
         _ready = true;
         RefreshAll();
         _timer.Start();
@@ -309,6 +296,15 @@ public partial class MainWindow : Window
         if (_ready) RefreshCharacters();
     }
 
+    private const string AllSeries = "All series";
+    private string _seriesFilter = AllSeries;
+
+    private void SeriesFilter_Changed(object sender, SelectionChangedEventArgs e)
+    {
+        _seriesFilter = SeriesFilterInput.SelectedItem as string ?? AllSeries;
+        if (_ready) RefreshCharacters();
+    }
+
     private void OwnedOnly_Changed(object sender, RoutedEventArgs e)
     {
         _ownedOnly = OwnedOnlyToggle.IsChecked == true;
@@ -471,7 +467,7 @@ public partial class MainWindow : Window
     {
         var cards = CharacterCatalog.Select(c => BuildCard(c, _state.OwnedCharacters.GetValueOrDefault(c.Id))).ToList();
         var visible = cards
-            .Where(c => (_rarityFilter == 0 || c.Rarity == _rarityFilter) && (!_ownedOnly || c.IsOwned))
+            .Where(c => (_rarityFilter == 0 || c.Rarity == _rarityFilter) && (!_ownedOnly || c.IsOwned) && (_seriesFilter == AllSeries || c.Source == _seriesFilter))
             .OrderByDescending(c => c.IsOwned).ThenByDescending(c => c.Rarity).ThenBy(c => c.Name)
             .ToList();
         var keep = _selectedCharacterId;
@@ -607,10 +603,22 @@ public partial class MainWindow : Window
         try { File.Delete(path); } catch { /* still in use; harmless leftover */ }
     }
 
-    private static readonly string LibraryFolder = Path.Combine(PortraitFolder, "library");
+    // Card art library: the repo's GameEventTracker\character-art folder (git-ignored) when the app runs from inside the repo,
+    // otherwise %LOCALAPPDATA%\AiriDesktop\portraits\library.
+    private static readonly string LibraryFolder = FindRepoArtFolder() ?? Path.Combine(PortraitFolder, "library");
+
+    private static string? FindRepoArtFolder()
+    {
+        for (var dir = new DirectoryInfo(AppContext.BaseDirectory); dir is not null; dir = dir.Parent)
+        {
+            var candidate = Path.Combine(dir.FullName, "character-art");
+            if (Directory.Exists(candidate)) return candidate;
+        }
+        return null;
+    }
     private static readonly string[] LibraryExtensions = [".gif", ".png", ".jpg", ".jpeg"];
 
-    /// <summary>Your own imported art wins; otherwise fall back to portraits\library\{id}.* (drop files named after the character id, e.g. ellen.png).</summary>
+    /// <summary>Your own imported art wins; otherwise fall back to the art library's {id}.* (files named after the character id, e.g. ellen.png).</summary>
     private ImageSource? Portrait(string characterId)
     {
         var path = _state.CharacterImages.GetValueOrDefault(characterId);
@@ -631,7 +639,7 @@ public partial class MainWindow : Window
             bitmap.CacheOption = BitmapCacheOption.OnLoad;
             bitmap.UriSource = new Uri(path, UriKind.Absolute);
             // Downscale big stills; GIFs are decoded frame-by-frame by the animator.
-            if (!path.EndsWith(".gif", StringComparison.OrdinalIgnoreCase)) bitmap.DecodePixelWidth = 420;
+            if (!path.EndsWith(".gif", StringComparison.OrdinalIgnoreCase)) bitmap.DecodePixelWidth = 300;
             bitmap.EndInit();
             bitmap.Freeze();
             return bitmap;
@@ -664,16 +672,221 @@ public partial class MainWindow : Window
         if (_state.Balance < cost) { GachaResultText.Text = $"You need {cost} ◆ for that pull."; return; }
         _state.Balance -= cost;
         var results = Enumerable.Range(0, count).Select(_ => DrawCharacter()).ToList();
-        foreach (var c in results) _state.OwnedCharacters[c.Id] = _state.OwnedCharacters.GetValueOrDefault(c.Id) + 1;
+        var pulled = new List<(CharacterModel Character, bool IsNew)>();
+        foreach (var c in results)
+        {
+            var before = _state.OwnedCharacters.GetValueOrDefault(c.Id);
+            _state.OwnedCharacters[c.Id] = before + 1;
+            pulled.Add((c, before == 0));
+        }
         _state.LastPulls = results.Select(c => c.Id).ToList();
         var best = results.MaxBy(c => c.Rarity)!;
-        GachaResultText.Text = count == 1
+        var summary = count == 1
             ? $"{Palette.Rarity(best.Rarity).Label} · {best.Name}"
             : $"{results.Count(c => c.Rarity == 5)} Legendary · {results.Count(c => c.Rarity == 4)} Epic · {results.Count(c => c.Rarity == 3)} Rare";
+        GachaResultText.Text = summary;
         SaveState();
         RefreshCharacters();
         RefreshBattle(force: true);
         RefreshSummary();
+        ShowPullReveal(pulled, summary);
+    }
+
+    // ───────────────────────── Pull reveal animation ─────────────────────────
+    // Pack rises → shakes and glows in the best rarity's color → top tears off, pack bursts with a flash →
+    // cards fly out face-down → flip one by one (lowest rarity first, best last). Click / Space skips; Esc / Enter closes.
+
+    private const string ScaleXPath = "(UIElement.RenderTransform).(TransformGroup.Children)[0].(ScaleTransform.ScaleX)";
+    private const string ScaleYPath = "(UIElement.RenderTransform).(TransformGroup.Children)[0].(ScaleTransform.ScaleY)";
+    private const string AnglePath = "(UIElement.RenderTransform).(TransformGroup.Children)[1].(RotateTransform.Angle)";
+    private const string MoveXPath = "(UIElement.RenderTransform).(TransformGroup.Children)[2].(TranslateTransform.X)";
+    private const string MoveYPath = "(UIElement.RenderTransform).(TransformGroup.Children)[2].(TranslateTransform.Y)";
+    private const string GlowPath = "(UIElement.Effect).(DropShadowEffect.Opacity)";
+    private Storyboard? _pullStoryboard;
+    private bool _pullAnimating;
+
+    private static Color RarityColor(int stars) => stars switch { 5 => Color.FromRgb(0xF5, 0xC5, 0x18), 4 => Color.FromRgb(0xA1, 0x5C, 0xF6), _ => Color.FromRgb(0x4C, 0x8D, 0xFF) };
+
+    private static void WithTransforms(UIElement element)
+    {
+        element.RenderTransformOrigin = new Point(.5, .5);
+        element.RenderTransform = new TransformGroup { Children = { new ScaleTransform(), new RotateTransform(), new TranslateTransform() } };
+    }
+
+    /// <summary>Keyframe animation with absolute times (seconds). Each frame eases in from the previous one.</summary>
+    private static DoubleAnimationUsingKeyFrames Frames(params (double T, double V, IEasingFunction? Ease)[] frames)
+    {
+        var anim = new DoubleAnimationUsingKeyFrames();
+        foreach (var (t, v, ease) in frames) anim.KeyFrames.Add(new EasingDoubleKeyFrame(v, KeyTime.FromTimeSpan(TimeSpan.FromSeconds(t)), ease));
+        return anim;
+    }
+
+    private static ObjectAnimationUsingKeyFrames Switch(Visibility from, Visibility to, double at) => new()
+    {
+        KeyFrames = { new DiscreteObjectKeyFrame(from, KeyTime.FromTimeSpan(TimeSpan.Zero)), new DiscreteObjectKeyFrame(to, KeyTime.FromTimeSpan(TimeSpan.FromSeconds(at))) }
+    };
+
+    private static void Animate(Storyboard sb, DependencyObject target, string path, Timeline anim)
+    {
+        Storyboard.SetTarget(anim, target);
+        Storyboard.SetTargetProperty(anim, new PropertyPath(path));
+        sb.Children.Add(anim);
+    }
+
+    private static FrameworkElement BuildCardBack() => new Border
+    {
+        CornerRadius = new CornerRadius(13),
+        BorderThickness = new Thickness(3),
+        BorderBrush = Palette.Hex("#4A4A55"),
+        Background = new LinearGradientBrush(Color.FromRgb(0x2A, 0x2A, 0x33), Color.FromRgb(0x12, 0x12, 0x16), 90),
+        Child = new Grid
+        {
+            Children =
+            {
+                new Border { Margin = new Thickness(10), CornerRadius = new CornerRadius(8), BorderBrush = Palette.Hex("#40F5C518"), BorderThickness = new Thickness(1) },
+                new TextBlock { Text = "AIRI'S", FontFamily = new FontFamily("Cascadia Mono, Consolas"), FontWeight = FontWeights.Bold, FontSize = 11, Foreground = Palette.Muted, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(0, 24, 0, 0) },
+                new Border
+                {
+                    Width = 76, Height = 76, CornerRadius = new CornerRadius(38), Background = Palette.Hex("#1A1405"), BorderBrush = Palette.Yellow, BorderThickness = new Thickness(3),
+                    HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center,
+                    Child = new TextBlock { Text = "信", FontSize = 36, FontWeight = FontWeights.Bold, Foreground = Palette.Yellow, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center }
+                }
+            }
+        }
+    };
+
+    private void ShowPullReveal(List<(CharacterModel Character, bool IsNew)> pulled, string summary)
+    {
+        _pullStoryboard?.Remove(PullOverlay);
+        PullCardsPanel.Children.Clear();
+
+        var best = pulled.Max(p => p.Character.Rarity);
+        var glow = RarityColor(best);
+        PackCountText.Text = pulled.Count == 1 ? "1 card" : $"{pulled.Count} cards";
+        PullSummaryText.Text = summary;
+        PullGlow.Fill = new RadialGradientBrush(Color.FromArgb(0x70, glow.R, glow.G, glow.B), Color.FromArgb(0, glow.R, glow.G, glow.B));
+        PackRoot.Effect = new DropShadowEffect { Color = glow, BlurRadius = 70, ShadowDepth = 0, Opacity = 0 };
+        WithTransforms(PackRoot);
+        WithTransforms(PackTear);
+        PullContinueButton.IsHitTestVisible = false;
+        PullHintText.Text = "Click anywhere to skip";
+        PullOverlay.Visibility = Visibility.Visible;
+
+        var sb = new Storyboard();
+        var backOut = new BackEase { EasingMode = EasingMode.EaseOut, Amplitude = .35 };
+        var cubicOut = new CubicEase { EasingMode = EasingMode.EaseOut };
+        var cubicIn = new CubicEase { EasingMode = EasingMode.EaseIn };
+
+        // 1. Backdrop and pack entrance
+        Animate(sb, PullOverlay, "Opacity", Frames((0, 0, null), (.25, 1, null)));
+        Animate(sb, PackRoot, MoveYPath, Frames((0, 560, null), (.05, 560, null), (.65, 0, backOut)));
+        foreach (var path in new[] { ScaleXPath, ScaleYPath })
+            Animate(sb, PackRoot, path, Frames((0, .6, null), (.05, .6, null), (.65, 1, backOut), (1.6, 1.04, null), (1.95, 1.35, cubicOut)));
+
+        // 2. Shake and glow in the best rarity's color
+        Animate(sb, PackRoot, AnglePath, Frames((0, 0, null), (.7, 0, null), (.8, -5, null), (.9, 5, null), (1.0, -4, null), (1.1, 4, null), (1.2, -3, null), (1.3, 3, null), (1.42, 0, null)));
+        Animate(sb, PackRoot, GlowPath, Frames((0, 0, null), (.7, 0, null), (1.3, 1, null)));
+        Animate(sb, PullGlow, "Opacity", Frames((0, 0, null), (.7, 0, null), (1.5, 1, null)));
+
+        // 3. Tear the top off, burst the pack, flash
+        Animate(sb, PackTear, MoveYPath, Frames((0, 0, null), (1.45, 0, null), (1.9, -200, cubicOut)));
+        Animate(sb, PackTear, MoveXPath, Frames((0, 0, null), (1.45, 0, null), (1.9, 70, cubicOut)));
+        Animate(sb, PackTear, AnglePath, Frames((0, 0, null), (1.45, 0, null), (1.9, -28, cubicOut)));
+        Animate(sb, PackTear, "Opacity", Frames((0, 1, null), (1.6, 1, null), (1.9, 0, null)));
+        Animate(sb, PackRoot, "Opacity", Frames((0, 1, null), (1.6, 1, null), (1.95, 0, cubicIn)));
+        Animate(sb, PullFlash, "Opacity", Frames((0, 0, null), (1.6, 0, null), (1.68, .8, null), (2.1, 0, cubicOut)));
+
+        // 4. Cards: lowest rarity first so the best card is revealed last
+        var ordered = pulled.Select((p, i) => (p.Character, p.IsNew, Index: i)).OrderBy(p => p.Character.Rarity).ThenBy(p => p.Index).ToList();
+        var single = ordered.Count == 1;
+        var scale = single ? 1.15 : .72;
+        PullCardsPanel.MaxWidth = 5 * (180 * scale + 20) + 2;
+        var lastReveal = 0.0;
+        for (var i = 0; i < ordered.Count; i++)
+        {
+            var (character, isNew, _) = ordered[i];
+            var card = BuildCard(character, _state.OwnedCharacters.GetValueOrDefault(character.Id));
+            var face = new ContentPresenter { Content = card, ContentTemplate = (DataTemplate)FindResource("CardFace"), Visibility = Visibility.Hidden };
+            var back = BuildCardBack();
+            var flipper = new Grid { Children = { face, back } };
+            WithTransforms(flipper);
+            var badge = new Border
+            {
+                Background = Palette.Yellow, CornerRadius = new CornerRadius(10), Padding = new Thickness(12, 3, 12, 3),
+                HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(0, -13, 0, 0), Visibility = Visibility.Hidden,
+                Child = new TextBlock { Text = "NEW", FontFamily = (FontFamily)FindResource("Display"), FontSize = 12, Foreground = Palette.Hex("#17140A") }
+            };
+            var holder = new Grid
+            {
+                Margin = new Thickness(10, 16, 10, 10), Opacity = 0,
+                LayoutTransform = new ScaleTransform(scale, scale),
+                Effect = new DropShadowEffect { Color = RarityColor(character.Rarity), BlurRadius = 45, ShadowDepth = 0, Opacity = 0 },
+                Children = { flipper, badge }
+            };
+            WithTransforms(holder);
+            PullCardsPanel.Children.Add(holder);
+
+            var appear = 1.75 + i * .05;
+            var reveal = single ? 2.35 : 2.45 + i * .22;
+            var flip = reveal + .14;
+            lastReveal = flip;
+            Animate(sb, holder, "Opacity", Frames((0, 0, null), (appear, 0, null), (appear + .25, 1, null)));
+            Animate(sb, holder, MoveYPath, Frames((0, 110, null), (appear, 110, null), (appear + .4, 0, backOut)));
+            Animate(sb, flipper, ScaleXPath, Frames((0, 1, null), (reveal, 1, null), (flip, 0, cubicIn), (flip + .14, 1, cubicOut)));
+            Animate(sb, back, "Visibility", Switch(Visibility.Visible, Visibility.Collapsed, flip));
+            Animate(sb, face, "Visibility", Switch(Visibility.Hidden, Visibility.Visible, flip));
+            if (isNew) Animate(sb, badge, "Visibility", Switch(Visibility.Hidden, Visibility.Visible, flip));
+            Animate(sb, holder, GlowPath, Frames((0, 0, null), (flip, 0, null), (flip + .3, character.Rarity == 5 ? 1 : character.Rarity == 4 ? .8 : .4, null)));
+            if (character.Rarity == 5)
+                foreach (var path in new[] { ScaleXPath, ScaleYPath })
+                    Animate(sb, holder, path, Frames((0, 1, null), (flip, 1, null), (flip + .18, 1.12, cubicOut), (flip + .5, 1, backOut)));
+        }
+
+        // 5. Summary and Continue
+        var end = lastReveal + .45;
+        Animate(sb, PullHeader, "Opacity", Frames((0, 0, null), (end - .2, 0, null), (end + .2, 1, null)));
+        Animate(sb, PullContinueButton, "Opacity", Frames((0, 0, null), (end - .2, 0, null), (end + .2, 1, null)));
+
+        sb.Completed += (_, _) => FinishPullReveal();
+        _pullStoryboard = sb;
+        _pullAnimating = true;
+        sb.Begin(PullOverlay, true);
+    }
+
+    private void FinishPullReveal()
+    {
+        if (!_pullAnimating) return;
+        _pullAnimating = false;
+        PullContinueButton.IsHitTestVisible = true;
+        PullHintText.Text = "Enter or Esc to close";
+        PullContinueButton.Focus();
+    }
+
+    private void SkipPullReveal()
+    {
+        if (!_pullAnimating || _pullStoryboard is null) return;
+        _pullStoryboard.SkipToFill(PullOverlay);
+        FinishPullReveal();
+    }
+
+    private void ClosePullReveal()
+    {
+        _pullStoryboard?.Remove(PullOverlay);
+        _pullStoryboard = null;
+        _pullAnimating = false;
+        PullOverlay.Visibility = Visibility.Collapsed;
+        PullCardsPanel.Children.Clear();
+    }
+
+    private void PullOverlay_MouseDown(object sender, MouseButtonEventArgs e) => SkipPullReveal();
+    private void PullContinue_Click(object sender, RoutedEventArgs e) => ClosePullReveal();
+
+    private void Window_PreviewKeyDown(object sender, KeyEventArgs e)
+    {
+        if (PullOverlay.Visibility != Visibility.Visible) return;
+        if (_pullAnimating && e.Key is Key.Space or Key.Enter or Key.Escape) SkipPullReveal();
+        else if (!_pullAnimating && e.Key is Key.Enter or Key.Escape or Key.Space) ClosePullReveal();
+        e.Handled = true;
     }
 
     // ───────────────────────── Rift battler ─────────────────────────

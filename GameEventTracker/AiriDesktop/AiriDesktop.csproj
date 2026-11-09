@@ -10,6 +10,7 @@
 
   <ItemGroup>
     <PackageReference Include="WpfAnimatedGif" Version="2.0.2" />
+    <EmbeddedResource Include="characters.json" LogicalName="characters.json" />
   </ItemGroup>
 
 

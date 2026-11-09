@@ -12,6 +12,7 @@ using System.Windows.Threading;
 using Microsoft.Win32;
 using Ellipse = System.Windows.Shapes.Ellipse;
 using Polygon = System.Windows.Shapes.Polygon;
+using Rectangle = System.Windows.Shapes.Rectangle;
 
 namespace AiriDesktop;
 
@@ -40,7 +41,7 @@ public partial class MainWindow : Window
     private bool _ownedOnly;
     private string? _selectedCharacterId;
     private string _battleListKey = "";
-    private DateTime _lastDay = DateTime.Today;
+    private DateTime _lastDay = GameDay;
     private int _lastArenaWave = -1;
     private int _ticks;
 
@@ -77,6 +78,7 @@ public partial class MainWindow : Window
         InitializeComponent();
         _state = LoadState();
         SeedFirstRun();
+        UpgradeToPresets();
         EnsureWeekly();
         _timer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
         _timer.Tick += (_, _) => Tick();
@@ -85,12 +87,16 @@ public partial class MainWindow : Window
         EventStartInput.SelectedDate = EventEndInput.SelectedDate = DateTime.Today;
         SeriesFilterInput.ItemsSource = new[] { AllSeries }.Concat(CharacterCatalog.Select(c => c.Source).Distinct().OrderBy(s => s)).ToList();
         SeriesFilterInput.SelectedIndex = 0;
+        PresetGameInput.ItemsSource = new[] { "+  Add a built-in game…" }.Concat(GamePresets.All.Select(p => p.Name)).ToList();
+        PresetGameInput.SelectedIndex = 0;
         _ready = true;
         RefreshAll();
         _timer.Start();
+        _fxTimer.Tick += (_, _) => BattleFxTick();
+        _fxTimer.Start();
     }
 
-    private static string TodayKey => DateTime.Today.ToString("yyyy-MM-dd");
+    private static string TodayKey => GameDay.ToString("yyyy-MM-dd");
     private static string? TagOf(object sender) => (sender as FrameworkElement)?.Tag as string;
 
     // ───────────────────────── Persistence ─────────────────────────
@@ -115,29 +121,48 @@ public partial class MainWindow : Window
     private void SeedFirstRun()
     {
         if (_state.IsInitialized) return;
-        var genshin = new GameModel { Name = "Genshin Impact" };
-        var starRail = new GameModel { Name = "Honkai: Star Rail" };
-        _state.Games.AddRange([genshin, starRail]);
-        _state.DailyQuests.AddRange([
-            new QuestModel { GameId = genshin.Id, Title = "Spend some Original Resin", Reward = 25 },
-            new QuestModel { GameId = genshin.Id, Title = "Complete a commission", Reward = 20 },
-            new QuestModel { GameId = starRail.Id, Title = "Complete a Calyx", Reward = 25 },
-            new QuestModel { GameId = starRail.Id, Title = "Use daily training", Reward = 20 }
-        ]);
+        var zzz = AddPresetGame(GamePresets.All[0]);
+        var starRail = AddPresetGame(GamePresets.All[1]);
+        AddPresetGame(GamePresets.All[2]);
         _state.Events.AddRange([
-            new EventModel { GameId = genshin.Id, Title = "Weekend co-op session", Starts = DateTime.Today.AddDays(2), Ends = DateTime.Today.AddDays(4) },
+            new EventModel { GameId = zzz.Id, Title = "Weekend co-op session", Starts = DateTime.Today.AddDays(2), Ends = DateTime.Today.AddDays(4) },
             new EventModel { GameId = starRail.Id, Title = "Community game night", Starts = DateTime.Today.AddDays(5), Ends = DateTime.Today.AddDays(5) }
         ]);
+        _state.PresetsVersion = 1;
         _state.Weekly.WeekOf = GetWeekKey();
         _state.Battler.Log.Add("Your Rift Runner is ready.");
         _state.IsInitialized = true;
         SaveState();
     }
 
+    /// <summary>Upgrades older saves once: swaps the four generic starter quests for the built-in routines and adds the built-in games.</summary>
+    private void UpgradeToPresets()
+    {
+        if (_state.PresetsVersion >= 1) return;
+        _state.DailyQuests.RemoveAll(q => GamePresets.LegacySeedTitles.Contains(q.Title));
+        foreach (var preset in GamePresets.All) AddPresetGame(preset);
+        _state.PresetsVersion = 1;
+        SaveState();
+    }
+
+    /// <summary>Adds the game if it's missing, then any of its built-in tasks that aren't there yet. Returns the game.</summary>
+    private GameModel AddPresetGame(GamePresets.Preset preset)
+    {
+        var game = _state.Games.FirstOrDefault(g => GamePresets.Find(g.Name) == preset);
+        if (game is null) { game = new GameModel { Name = preset.Name }; _state.Games.Add(game); }
+        foreach (var task in preset.Tasks)
+            if (!_state.DailyQuests.Any(q => q.GameId == game.Id && q.Title.Equals(task.Title, StringComparison.OrdinalIgnoreCase)))
+                _state.DailyQuests.Add(new QuestModel { GameId = game.Id, Title = task.Title, Reward = task.Reward, Weekly = task.Weekly });
+        return game;
+    }
+
+    // Games reset at 4:00 AM, so the app's "day" and "week" do too.
+    private static DateTime GameDay => DateTime.Now.AddHours(-4).Date;
+
     private static string GetWeekKey()
     {
-        var today = DateTime.Today;
-        return today.AddDays(-(((int)today.DayOfWeek + 6) % 7)).ToString("yyyy-MM-dd");
+        var day = GameDay;
+        return day.AddDays(-(((int)day.DayOfWeek + 6) % 7)).ToString("yyyy-MM-dd");
     }
 
     private bool EnsureWeekly()
@@ -152,7 +177,7 @@ public partial class MainWindow : Window
     private void Tick()
     {
         _ticks++;
-        if (DateTime.Today != _lastDay) { _lastDay = DateTime.Today; EnsureWeekly(); RefreshAll(); }
+        if (GameDay != _lastDay) { _lastDay = GameDay; EnsureWeekly(); RefreshAll(); }
         else if (EnsureWeekly()) RefreshWeekly();
         if (ProcessBattle()) SaveState();
         RefreshBattle();
@@ -237,10 +262,36 @@ public partial class MainWindow : Window
     private void RefreshQuests()
     {
         var questGame = QuestGameInput.SelectedValue as string;
-        var today = TodayKey;
-        var rows = _state.DailyQuests.Where(q => q.GameId == questGame).Select(q => new QuestRowModel(q.Id, q.Title, q.Reward, q.CompletedOn == today)).ToList();
+        var rows = _state.DailyQuests.Where(q => q.GameId == questGame && q.Weekly == _weeklyQuests)
+            .Select(q => new QuestRowModel(q.Id, q.Title, q.Reward, IsQuestDone(q))).ToList();
         DailyQuestsList.ItemsSource = rows;
+        QuestsEmpty.Text = _weeklyQuests ? "No weekly quests for this game yet." : "No daily quests for this game yet.";
         QuestsEmpty.Visibility = rows.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+        QuestsTitleRun.Text = _weeklyQuests ? "Weekly quests " : "Daily quests ";
+        QuestsResetText.Text = _weeklyQuests ? "RESETS MON 4 AM" : "RESETS 4 AM";
+        DailyQuestNameInput.Tag = _weeklyQuests ? "New weekly quest" : "New daily quest";
+        QuestRewardInput.Tag = _weeklyQuests ? "60 ◆" : "25 ◆";
+    }
+
+    private bool _weeklyQuests;
+    private static bool IsQuestDone(QuestModel q) => q.Weekly ? q.CompletedWeek == GetWeekKey() : q.CompletedOn == TodayKey;
+
+    private void QuestPeriod_Checked(object sender, RoutedEventArgs e)
+    {
+        _weeklyQuests = TagOf(sender) == "weekly";
+        if (_ready) RefreshQuests();
+    }
+
+    private void PresetGameInput_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (!_ready || PresetGameInput.SelectedIndex <= 0) return;
+        var preset = GamePresets.All[PresetGameInput.SelectedIndex - 1];
+        var game = AddPresetGame(preset);
+        _selectedGameId = game.Id;
+        QuestGameInput.SelectedValue = game.Id;
+        SaveState();
+        RefreshAll();
+        PresetGameInput.SelectedIndex = 0;
     }
 
     private List<WeeklyGoalRow> BuildWeeklyGoals() =>
@@ -260,8 +311,8 @@ public partial class MainWindow : Window
     private void RefreshSummary()
     {
         BalanceText.Text = _state.Balance.ToString("N0");
-        var quests = _state.DailyQuests.Where(q => IsGame(q.GameId)).ToList();
-        ChipDailyText.Text = $"{quests.Count(q => q.CompletedOn == TodayKey)}/{quests.Count}";
+        var quests = _state.DailyQuests.Where(q => IsGame(q.GameId) && !q.Weekly).ToList();
+        ChipDailyText.Text = $"{quests.Count(IsQuestDone)}/{quests.Count}";
         ChipWeeklyText.Text = BuildWeeklyGoals().Count(g => g.Ready).ToString();
         ChipEventsText.Text = _state.Events.Count(e => !e.Done && e.Ends.Date >= DateTime.Today).ToString("00");
         ChipPityText.Text = (50 - _state.PityFive).ToString();
@@ -321,6 +372,16 @@ public partial class MainWindow : Window
     {
         var name = GameNameInput.Text.Trim();
         if (name.Length == 0) return;
+        if (GamePresets.Find(name) is { } preset)
+        {
+            var presetGame = AddPresetGame(preset);
+            _selectedGameId = presetGame.Id;
+            QuestGameInput.SelectedValue = presetGame.Id;
+            GameNameInput.Clear();
+            SaveState();
+            RefreshAll();
+            return;
+        }
         if (_state.Games.Any(g => g.Name.Equals(name, StringComparison.OrdinalIgnoreCase)))
         {
             MessageBox.Show("That game is already in your library.", "Airi's");
@@ -400,8 +461,8 @@ public partial class MainWindow : Window
     private void AddDailyQuest_Click(object sender, RoutedEventArgs e)
     {
         if (QuestGameInput.SelectedItem is not GameModel game || string.IsNullOrWhiteSpace(DailyQuestNameInput.Text)) return;
-        var reward = int.TryParse(QuestRewardInput.Text.Trim(), out var value) ? Math.Clamp(value, 1, 1000) : DefaultQuestReward;
-        _state.DailyQuests.Add(new QuestModel { GameId = game.Id, Title = DailyQuestNameInput.Text.Trim(), Reward = reward });
+        var reward = int.TryParse(QuestRewardInput.Text.Trim(), out var value) ? Math.Clamp(value, 1, 1000) : _weeklyQuests ? 60 : DefaultQuestReward;
+        _state.DailyQuests.Add(new QuestModel { GameId = game.Id, Title = DailyQuestNameInput.Text.Trim(), Reward = reward, Weekly = _weeklyQuests });
         DailyQuestNameInput.Clear();
         QuestRewardInput.Clear();
         SaveState();
@@ -412,11 +473,15 @@ public partial class MainWindow : Window
     private void CompleteDaily_Click(object sender, RoutedEventArgs e)
     {
         var quest = _state.DailyQuests.FirstOrDefault(q => q.Id == TagOf(sender));
-        if (quest is null || quest.CompletedOn == TodayKey) return;
-        quest.CompletedOn = TodayKey;
-        quest.EarnedOn = quest.CompletedOn;
+        if (quest is null || IsQuestDone(quest)) return;
+        if (quest.Weekly) quest.CompletedWeek = GetWeekKey();
+        else
+        {
+            quest.CompletedOn = TodayKey;
+            quest.EarnedOn = quest.CompletedOn;
+            _state.Weekly.DailyClears++;
+        }
         _state.Balance += quest.Reward;
-        _state.Weekly.DailyClears++;
         SaveState();
         RefreshQuests();
         RefreshWeekly();
@@ -1041,6 +1106,7 @@ public partial class MainWindow : Window
         {
             _battleListKey = key;
             PartyList.ItemsSource = GetParty().Select(p => BuildCard(p.Character, p.Copies)).OrderByDescending(c => c.Rarity).ThenByDescending(c => c.Copies).ToList();
+            RefreshArenaParty();
             var stats = GetPartyStats();
             StatHpText.Text = stats.Hp.ToString("N0");
             StatAtkText.Text = stats.Attack.ToString("N0");
@@ -1093,6 +1159,8 @@ public partial class MainWindow : Window
         var sky = ColorFrom(biome.Sky); var ground = ColorFrom(biome.Ground); var glow = ColorFrom(biome.Glow);
         ArenaCard.Background = new LinearGradientBrush(sky, ground, 90); MonsterGlyphText.Foreground = new SolidColorBrush(glow);
         if (_lastArenaWave == wave) return;
+        var waveCleared = _monsterVisual is not null && _lastArenaWave > 0 && wave > _lastArenaWave;
+        if (waveCleared) DefeatBurst(_monsterCenter, boss: _lastArenaWave % 20 == 0);
         _lastArenaWave = wave; ArenaCanvas.Children.Clear(); var random = new Random(wave * 37); var width = ArenaCanvas.ActualWidth; var height = ArenaCanvas.ActualHeight;
         var moon = new Ellipse { Width = 80, Height = 80, Fill = new SolidColorBrush(glow), Opacity = .3 }; Canvas.SetLeft(moon, width * .62); Canvas.SetTop(moon, 25 + random.Next(25)); ArenaCanvas.Children.Add(moon);
         for (var layer = 0; layer < 3; layer++)
@@ -1102,8 +1170,184 @@ public partial class MainWindow : Window
             points.Add(new Point(width, height));
             ArenaCanvas.Children.Add(new Polygon { Points = points, Fill = new SolidColorBrush(layer == 0 ? Color.FromRgb(17, 20, 18) : ground), Opacity = .45 + layer * .16 });
         }
-        var monster = new Polygon { Points = new PointCollection([new(0, 36), new(18, 8), new(35, 25), new(53, 0), new(70, 27), new(92, 14), new(100, 54), new(82, 68), new(93, 115), new(60, 98), new(43, 130), new(25, 92), new(3, 108), new(18, 68)]), Fill = new LinearGradientBrush(glow, Color.FromRgb(38, 49, 39), 90) };
-        Canvas.SetLeft(monster, width * .78); Canvas.SetTop(monster, Math.Max(0, height - 150)); ArenaCanvas.Children.Add(monster);
+        // The monster: a jagged silhouette with a glowing core, bigger for bosses. Slides in on each new wave.
+        var body = new Polygon { Points = new PointCollection([new(0, 36), new(18, 8), new(35, 25), new(53, 0), new(70, 27), new(92, 14), new(100, 54), new(82, 68), new(93, 115), new(60, 98), new(43, 130), new(25, 92), new(3, 108), new(18, 68)]), Fill = new LinearGradientBrush(glow, Color.FromRgb(38, 49, 39), 90) };
+        var core = new TextBlock { Text = boss ? "♜" : wave % 3 == 0 ? "◈" : "◆", FontSize = 30, Foreground = new SolidColorBrush(Color.FromRgb(20, 22, 20)), HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 0, 20) };
+        var monster = new Grid { Width = 100, Height = 130, Children = { body, core }, Effect = new DropShadowEffect { Color = glow, BlurRadius = 30, ShadowDepth = 0, Opacity = .55 } };
+        WithTransforms(monster);
+        monster.RenderTransformOrigin = new Point(.5, 1);
+        var bossScale = boss ? 1.45 : 1;
+        var (mScale, _, mMove) = Parts(monster);
+        mScale.ScaleX = mScale.ScaleY = bossScale;
+        var left = width * .76; var top = Math.Max(0, height - 158);
+        Canvas.SetLeft(monster, left); Canvas.SetTop(monster, top); ArenaCanvas.Children.Add(monster);
+        _monsterVisual = monster;
+        _monsterCenter = new Point(left + 50, top + 130 - 65 * bossScale);
+        mMove.BeginAnimation(TranslateTransform.XProperty, Frames((0, 160, null), (waveCleared ? .35 : 0, 160, null), ((waveCleared ? .35 : 0) + .5, 0, new CubicEase { EasingMode = EasingMode.EaseOut })));
+        monster.BeginAnimation(OpacityProperty, Frames((0, 0, null), (waveCleared ? .35 : 0, 0, null), ((waveCleared ? .35 : 0) + .4, 1, null)));
+        // idle breathing
+        mScale.BeginAnimation(ScaleTransform.ScaleYProperty, new DoubleAnimation(bossScale, bossScale * 1.04, TimeSpan.FromSeconds(1.4)) { AutoReverse = true, RepeatBehavior = RepeatBehavior.Forever, EasingFunction = new SineEase() });
+    }
+
+    // ───────────────────────── Auto-battle animation ─────────────────────────
+    // Purely visual: the real wave/boss maths runs in ProcessBattle. Every tick a party card lunges and hits the monster
+    // (slash + damage number, gold "CRIT" sometimes); every fifth tick the monster strikes back at a random card.
+
+    private sealed record ArenaFighter(CharacterCardModel Card, Border HitFlash);
+    private readonly DispatcherTimer _fxTimer = new() { Interval = TimeSpan.FromMilliseconds(800) };
+    private FrameworkElement? _monsterVisual;
+    private Point _monsterCenter;
+    private int _fxTurn;
+    private string _arenaPartyKey = "";
+
+    private static (ScaleTransform Scale, RotateTransform Rotate, TranslateTransform Move) Parts(UIElement element)
+    {
+        var group = (TransformGroup)element.RenderTransform;
+        return ((ScaleTransform)group.Children[0], (RotateTransform)group.Children[1], (TranslateTransform)group.Children[2]);
+    }
+
+    private void RefreshArenaParty()
+    {
+        var party = GetParty().Select(p => BuildCard(p.Character, p.Copies)).OrderByDescending(c => c.Rarity).ThenByDescending(c => c.Copies).Take(5).ToList();
+        var key = string.Join(",", party.Select(c => $"{c.Id}{c.Copies}{c.Portrait?.GetHashCode()}"));
+        if (key == _arenaPartyKey) return;
+        _arenaPartyKey = key;
+        ArenaPartyPanel.Children.Clear();
+        foreach (var card in party) ArenaPartyPanel.Children.Add(BuildArenaFighter(card));
+    }
+
+    private FrameworkElement BuildArenaFighter(CharacterCardModel c)
+    {
+        var image = new Image { Stretch = Stretch.UniformToFill };
+        if (c.Portrait is not null)
+        {
+            WpfAnimatedGif.ImageBehavior.SetAnimatedSource(image, c.Portrait);
+            WpfAnimatedGif.ImageBehavior.SetRepeatBehavior(image, RepeatBehavior.Forever);
+        }
+        var hit = new Border { Background = Palette.Red, Opacity = 0 };
+        var art = new Border
+        {
+            Width = 76, Height = 100, CornerRadius = new CornerRadius(9), BorderBrush = c.Accent, BorderThickness = new Thickness(2), Background = c.ArtBackground, ClipToBounds = true,
+            Child = new Grid
+            {
+                Children =
+                {
+                    new TextBlock { Text = c.Initials, FontFamily = (FontFamily)FindResource("Display"), FontSize = 22, Foreground = Palette.Hex("#55FFFFFF"), HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center, Visibility = c.InitialsVisibility },
+                    image,
+                    hit,
+                    new Border
+                    {
+                        Width = 16, Height = 16, CornerRadius = new CornerRadius(8), Background = c.Accent, HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(3),
+                        Child = new TextBlock { Text = c.RarityLetter, FontFamily = (FontFamily)FindResource("Display"), FontSize = 8, Foreground = Palette.Hex("#141414"), HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center }
+                    }
+                }
+            }
+        };
+        var name = new TextBlock { Text = c.Name, FontSize = 10, FontWeight = FontWeights.Bold, Foreground = Brushes.White, TextTrimming = TextTrimming.CharacterEllipsis, Width = 76, Margin = new Thickness(1, 4, 0, 0) };
+        var holder = new StackPanel { Margin = new Thickness(0, 0, 12, 0), Tag = new ArenaFighter(c, hit), Children = { art, name }, Effect = new DropShadowEffect { Color = Colors.Black, BlurRadius = 18, ShadowDepth = 4, Opacity = .6 } };
+        WithTransforms(holder);
+        return holder;
+    }
+
+    private void BattleFxTick()
+    {
+        if (RiftView.Visibility != Visibility.Visible || PullOverlay.Visibility == Visibility.Visible || _state.Battler.Paused || _monsterVisual is null) return;
+        var fighters = ArenaPartyPanel.Children.OfType<FrameworkElement>().ToList();
+        if (fighters.Count == 0) return;
+        _fxTurn++;
+        if (_fxTurn % 5 == 0) { MonsterStrike(fighters[_random.Next(fighters.Count)]); return; }
+
+        var attacker = fighters[(_fxTurn - _fxTurn / 5) % fighters.Count];
+        var fighter = (ArenaFighter)attacker.Tag;
+        var outEase = new CubicEase { EasingMode = EasingMode.EaseOut };
+        var (_, rotate, move) = Parts(attacker);
+        move.BeginAnimation(TranslateTransform.XProperty, Frames((0, 0, null), (.12, 38, outEase), (.42, 0, null)));
+        move.BeginAnimation(TranslateTransform.YProperty, Frames((0, 0, null), (.12, -18, outEase), (.42, 0, null)));
+        rotate.BeginAnimation(RotateTransform.AngleProperty, Frames((0, 0, null), (.12, 7, null), (.42, 0, null)));
+
+        var crit = _random.NextDouble() < Math.Clamp(fighter.Card.Aura / 150.0, .08, .5);
+        var damage = (int)(fighter.Card.Pow * (1 + _state.Battler.Wave / 8.0) * (crit ? 2.2 : 1) * (.85 + _random.NextDouble() * .3));
+        Slash(crit ? Palette.Yellow.Color : Colors.White, .1);
+        HitMonster(.12);
+        var at = new Point(_monsterCenter.X + _random.Next(-30, 30), _monsterCenter.Y - 20 + _random.Next(-15, 15));
+        FloatText(crit ? $"CRIT {damage:N0}" : damage.ToString("N0"), crit ? Palette.Yellow : Brushes.White, crit ? 26 : 20, at, .14, pop: crit);
+    }
+
+    private void HitMonster(double delay)
+    {
+        if (_monsterVisual is null) return;
+        var (_, _, move) = Parts(_monsterVisual);
+        move.BeginAnimation(TranslateTransform.XProperty, Frames((0, 0, null), (delay, 0, null), (delay + .05, 12, null), (delay + .12, -9, null), (delay + .2, 6, null), (delay + .3, 0, null)));
+        _monsterVisual.BeginAnimation(OpacityProperty, Frames((0, 1, null), (delay, 1, null), (delay + .04, .4, null), (delay + .22, 1, null)));
+    }
+
+    private void MonsterStrike(FrameworkElement target)
+    {
+        if (_monsterVisual is null) return;
+        var fighter = (ArenaFighter)target.Tag;
+        var (_, _, mMove) = Parts(_monsterVisual);
+        mMove.BeginAnimation(TranslateTransform.XProperty, Frames((0, 0, null), (.15, -70, new CubicEase { EasingMode = EasingMode.EaseIn }), (.5, 0, new CubicEase { EasingMode = EasingMode.EaseOut })));
+        var (_, _, tMove) = Parts(target);
+        tMove.BeginAnimation(TranslateTransform.XProperty, Frames((0, 0, null), (.16, 0, null), (.21, -9, null), (.28, 7, null), (.35, -4, null), (.44, 0, null)));
+        fighter.HitFlash.BeginAnimation(OpacityProperty, Frames((0, 0, null), (.15, 0, null), (.2, .65, null), (.55, 0, null)));
+        var at = target.TranslatePoint(new Point(38, 10), BattleFxCanvas);
+        var hit = (int)((12 + (_state.Battler.Wave - 1) * 7) * (.8 + _random.NextDouble() * .4));
+        FloatText($"-{hit:N0}", Palette.Red, 18, at, .18, pop: false);
+    }
+
+    private void Slash(Color color, double delay)
+    {
+        var slash = new Rectangle
+        {
+            Width = 170, Height = 5, RadiusX = 2.5, RadiusY = 2.5, Fill = new SolidColorBrush(color), Opacity = 0,
+            Effect = new DropShadowEffect { Color = color, BlurRadius = 18, ShadowDepth = 0, Opacity = .9 }
+        };
+        WithTransforms(slash);
+        var (scale, rotate, _) = Parts(slash);
+        rotate.Angle = _random.Next(-50, -20);
+        Canvas.SetLeft(slash, _monsterCenter.X - 85); Canvas.SetTop(slash, _monsterCenter.Y - 2);
+        BattleFxCanvas.Children.Add(slash);
+        scale.BeginAnimation(ScaleTransform.ScaleXProperty, Frames((0, 0, null), (delay, 0, null), (delay + .09, 1, new CubicEase { EasingMode = EasingMode.EaseOut })));
+        var fade = Frames((0, 0, null), (delay, 0, null), (delay + .04, 1, null), (delay + .3, 0, null));
+        fade.Completed += (_, _) => BattleFxCanvas.Children.Remove(slash);
+        slash.BeginAnimation(OpacityProperty, fade);
+    }
+
+    private void FloatText(string text, Brush color, double size, Point at, double delay, bool pop)
+    {
+        var label = new TextBlock
+        {
+            Text = text, FontFamily = (FontFamily)FindResource("Display"), FontSize = size, Foreground = color, Opacity = 0,
+            Effect = new DropShadowEffect { Color = Colors.Black, BlurRadius = 6, ShadowDepth = 2, Opacity = .9 }
+        };
+        WithTransforms(label);
+        label.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+        Canvas.SetLeft(label, at.X - label.DesiredSize.Width / 2); Canvas.SetTop(label, at.Y - label.DesiredSize.Height / 2);
+        BattleFxCanvas.Children.Add(label);
+        var (scale, _, move) = Parts(label);
+        move.BeginAnimation(TranslateTransform.YProperty, Frames((0, 0, null), (delay, 0, null), (delay + .9, -70, new CubicEase { EasingMode = EasingMode.EaseOut })));
+        if (pop)
+            foreach (var dp in new[] { ScaleTransform.ScaleXProperty, ScaleTransform.ScaleYProperty })
+                scale.BeginAnimation(dp, Frames((0, .5, null), (delay, .5, null), (delay + .14, 1.25, null), (delay + .3, 1, null)));
+        var fade = Frames((0, 0, null), (delay, 0, null), (delay + .05, 1, null), (delay + .6, 1, null), (delay + .95, 0, null));
+        fade.Completed += (_, _) => BattleFxCanvas.Children.Remove(label);
+        label.BeginAnimation(OpacityProperty, fade);
+    }
+
+    private void DefeatBurst(Point at, bool boss)
+    {
+        var color = boss ? Palette.Yellow.Color : Colors.White;
+        var ring = new Ellipse { Width = 60, Height = 60, Stroke = new SolidColorBrush(color), StrokeThickness = 4, Opacity = 0, Effect = new DropShadowEffect { Color = color, BlurRadius = 25, ShadowDepth = 0 } };
+        WithTransforms(ring);
+        Canvas.SetLeft(ring, at.X - 30); Canvas.SetTop(ring, at.Y - 30);
+        BattleFxCanvas.Children.Add(ring);
+        var (scale, _, _) = Parts(ring);
+        foreach (var dp in new[] { ScaleTransform.ScaleXProperty, ScaleTransform.ScaleYProperty })
+            scale.BeginAnimation(dp, Frames((0, .3, null), (.5, boss ? 5 : 3.2, new CubicEase { EasingMode = EasingMode.EaseOut })));
+        var fade = Frames((0, 1, null), (.5, 0, null));
+        fade.Completed += (_, _) => BattleFxCanvas.Children.Remove(ring);
+        ring.BeginAnimation(OpacityProperty, fade);
+        FloatText(boss ? "BOSS DOWN!" : "CLEAR", boss ? Palette.Yellow : Palette.Green, boss ? 34 : 24, new Point(at.X, at.Y - 30), 0, pop: true);
     }
 
     private static Color ColorFrom(string value) => (Color)ColorConverter.ConvertFromString(value)!;

@@ -736,7 +736,8 @@
                             <TextBlock Text="Games" Style="{StaticResource H2}" />
                         </StackPanel>
                         <StackPanel DockPanel.Dock="Bottom" Margin="0,12,0,0">
-                            <TextBox x:Name="GameNameInput" Tag="What are you playing?" KeyDown="GameNameInput_KeyDown" />
+                            <ComboBox x:Name="PresetGameInput" SelectionChanged="PresetGameInput_SelectionChanged" ToolTip="Adds the game with its daily and weekly routine" />
+                            <TextBox x:Name="GameNameInput" Tag="Or type any game…" KeyDown="GameNameInput_KeyDown" />
                             <Button Content="+  Add a game" Click="AddGame_Click" />
                         </StackPanel>
                         <ListBox x:Name="GamesList" SelectedValuePath="Id" SelectionChanged="GamesList_SelectionChanged">
@@ -845,13 +846,25 @@
                             <RowDefinition Height="Auto" />
                         </Grid.RowDefinitions>
                         <DockPanel Grid.Row="0" Margin="0,0,0,14">
-                            <TextBlock DockPanel.Dock="Right" Text="RESETS DAILY" Style="{StaticResource MonoSmall}" Foreground="{StaticResource Muted}" VerticalAlignment="Bottom" Margin="0,0,0,4" />
+                            <TextBlock x:Name="QuestsResetText" DockPanel.Dock="Right" Text="RESETS 4 AM" Style="{StaticResource MonoSmall}" Foreground="{StaticResource Muted}" VerticalAlignment="Bottom" Margin="0,0,0,4" />
                             <StackPanel>
                                 <TextBlock Text="A LITTLE PROGRESS ADDS UP" Style="{StaticResource Kicker}" />
-                                <TextBlock Style="{StaticResource H2}"><Run Text="Daily quests " /><Run Text="✳" Foreground="{StaticResource Orange}" /></TextBlock>
+                                <TextBlock Style="{StaticResource H2}"><Run x:Name="QuestsTitleRun" Text="Daily quests " /><Run Text="✳" Foreground="{StaticResource Orange}" /></TextBlock>
                             </StackPanel>
                         </DockPanel>
-                        <ComboBox x:Name="QuestGameInput" Grid.Row="1" DisplayMemberPath="Name" SelectedValuePath="Id" SelectionChanged="QuestGameInput_SelectionChanged" Margin="0,0,0,12" />
+                        <Grid Grid.Row="1" Margin="0,0,0,12">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <ComboBox x:Name="QuestGameInput" Grid.Column="0" DisplayMemberPath="Name" SelectedValuePath="Id" SelectionChanged="QuestGameInput_SelectionChanged" Margin="0,0,8,0" />
+                            <Border Grid.Column="1" Style="{StaticResource SegmentBox}" VerticalAlignment="Center">
+                                <StackPanel Orientation="Horizontal">
+                                    <RadioButton Style="{StaticResource FilterChip}" Content="Daily" Tag="daily" GroupName="QuestPeriod" IsChecked="True" Checked="QuestPeriod_Checked" />
+                                    <RadioButton Style="{StaticResource FilterChip}" Content="Weekly" Tag="weekly" GroupName="QuestPeriod" Checked="QuestPeriod_Checked" />
+                                </StackPanel>
+                            </Border>
+                        </Grid>
                         <Grid Grid.Row="2">
                             <ListBox x:Name="DailyQuestsList">
                                 <ListBox.ItemTemplate>
@@ -1103,7 +1116,7 @@
             <!-- ================= RIFT DESCENT ================= -->
             <ScrollViewer x:Name="RiftView" Visibility="Collapsed" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Padding="0,0,10,0">
                 <StackPanel>
-                    <Border x:Name="ArenaCard" CornerRadius="22" BorderBrush="#2E3A30" BorderThickness="1" Height="290" ClipToBounds="True" Background="#20372F">
+                    <Border x:Name="ArenaCard" CornerRadius="22" BorderBrush="#2E3A30" BorderThickness="1" Height="350" ClipToBounds="True" Background="#20372F">
                         <Grid>
                             <Canvas x:Name="ArenaCanvas" ClipToBounds="True" />
                             <Border>
@@ -1114,16 +1127,16 @@
                                     </LinearGradientBrush>
                                 </Border.Background>
                             </Border>
-                            <StackPanel Margin="46,0,0,0" VerticalAlignment="Center" HorizontalAlignment="Left">
+                            <StackPanel Margin="40,28,0,0" VerticalAlignment="Top" HorizontalAlignment="Left" IsHitTestVisible="False">
                                 <TextBlock x:Name="BiomeText" Text="MOSSLIGHT RUINS" Style="{StaticResource Kicker}" Foreground="{StaticResource Yellow}" FontSize="12" />
-                                <TextBlock x:Name="MonsterNameText" Text="Rift scout" FontFamily="{StaticResource Display}" FontSize="46" Margin="0,6,0,6" />
+                                <TextBlock x:Name="MonsterNameText" Text="Rift scout" FontFamily="{StaticResource Display}" FontSize="38" Margin="0,4,0,4" />
                                 <TextBlock x:Name="EnemyStatsText" Foreground="#D9D9E0" FontFamily="{StaticResource Mono}" FontSize="13" />
-                                <StackPanel Orientation="Horizontal" Margin="0,24,0,0">
-                                    <Button x:Name="PauseBattleButton" Style="{StaticResource PrimaryButton}" Content="Pause" Click="PauseBattle_Click" />
-                                    <Button x:Name="ReturnBossButton" Content="Return to boss" Margin="12,0,0,0" Padding="22,12" Background="#141418" Click="ReturnBoss_Click" Visibility="Collapsed" />
-                                </StackPanel>
                             </StackPanel>
-                            <TextBlock x:Name="MonsterGlyphText" Text="◆" FontSize="96" HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,96,40" />
+                            <TextBlock x:Name="MonsterGlyphText" Visibility="Collapsed" />
+                            <!-- Auto-battling party: the top five cards -->
+                            <StackPanel x:Name="ArenaPartyPanel" Orientation="Horizontal" VerticalAlignment="Bottom" HorizontalAlignment="Left" Margin="40,0,0,22" IsHitTestVisible="False" />
+                            <!-- Slashes, damage numbers, bursts -->
+                            <Canvas x:Name="BattleFxCanvas" IsHitTestVisible="False" ClipToBounds="True" />
                         </Grid>
                     </Border>
 
@@ -1132,6 +1145,10 @@
                             <StackPanel DockPanel.Dock="Left" Width="340">
                                 <TextBlock x:Name="WaveText" Text="WAVE 1" Style="{StaticResource Kicker}" Foreground="{StaticResource Red}" FontSize="12" />
                                 <TextBlock x:Name="BattleStatusText" Text="Next wave in 12s" FontWeight="SemiBold" FontSize="16" Margin="0,4,0,0" />
+                            </StackPanel>
+                            <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Margin="24,0,0,0" VerticalAlignment="Center">
+                                <Button x:Name="ReturnBossButton" Content="Return to boss" Margin="0,0,10,0" Padding="20,10" Background="#141418" Click="ReturnBoss_Click" Visibility="Collapsed" />
+                                <Button x:Name="PauseBattleButton" Style="{StaticResource PrimaryButton}" Content="Pause" Padding="26,10" Click="PauseBattle_Click" />
                             </StackPanel>
                             <Grid VerticalAlignment="Center">
                                 <ProgressBar x:Name="WaveProgressBar" Height="8" Maximum="1" Foreground="{StaticResource Orange}" />

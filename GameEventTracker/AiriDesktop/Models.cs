@@ -3,6 +3,7 @@ namespace AiriDesktop;
 internal sealed class AppState
 {
     public bool IsInitialized { get; set; }
+    public int PresetsVersion { get; set; }
     public int Balance { get; set; }
     public List<GameModel> Games { get; set; } = [];
     public List<EventModel> Events { get; set; } = [];
@@ -43,6 +44,8 @@ internal sealed class QuestModel
     public int Reward { get; set; } = 25;
     public string? CompletedOn { get; set; }
     public string? EarnedOn { get; set; }
+    public bool Weekly { get; set; }
+    public string? CompletedWeek { get; set; }
     public string Summary => $"{(CompletedOn == DateTime.Today.ToString("yyyy-MM-dd") ? "✓" : "○")}  {Title}  ·  +{Reward} P";
 }
 
